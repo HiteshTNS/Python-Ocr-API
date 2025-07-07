@@ -62,22 +62,28 @@ def extract_text_from_pdf(pdf_path, dpi=300):
 def process_folder(folder_path, output_json_path, dpi=100):
     """
     Processes all PDFs in a folder and writes extracted text to a JSON file.
-    JSON format: { "filename.pdf": ["page 1 text", "page 2 text", ...], ... }
+    Returns (number_processed, total_files).
     """
     result = {}
     pdf_files = [f for f in os.listdir(folder_path) if f.lower().endswith('.pdf')]
+    processed_count = 0
     for filename in pdf_files:
         pdf_path = os.path.join(folder_path, filename)
-        print(f"Processing: {filename}")
-        result[filename] = extract_text_from_pdf(pdf_path, dpi=dpi)
+        try:
+            print(f"Processing: {filename}")
+            result[filename] = extract_text_from_pdf(pdf_path, dpi=dpi)
+            processed_count += 1
+        except Exception as e:
+            print(f"Failed to process {filename}: {e}")
     with open(output_json_path, 'w', encoding='utf-8') as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
     print(f"Extraction complete. Output saved to {output_json_path}")
+    return processed_count, len(pdf_files)
 
-def process_all_pdfs(folder_path: str, output_json_path: str) -> str:
-    """
-    Wrapper function to process all PDFs in a folder and return the output JSON path.
-    """
-    process_folder(folder_path, output_json_path)
-    return output_json_path
 
+def process_all_pdfs(folder_path: str, output_json_path: str):
+    processed_count, total_files = process_folder(folder_path, output_json_path)
+    if total_files == 0:
+        return False, output_json_path  # No files found
+    percent = processed_count / total_files
+    return percent >= 0.9, output_json_path

@@ -14,12 +14,11 @@ router = APIRouter()
 @router.post("/extractclaimdocuments", response_model=ExtractionResponse)
 def extract_claim_documents():
     try:
-        folder_path = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF"  # Or get from config/env
+        folder_path = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF"
         output_json = r"C:\Users\hitesh.paliwal\Desktop\claims_data.json"
-        json_file = process_all_pdfs(folder_path, output_json)
+        Extraction_Completed, json_file = process_all_pdfs(folder_path, output_json)
         return ExtractionResponse(
-            message="All files are processed and stored.",
-            json_file=json_file
+            Extraction_Completed=Extraction_Completed
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Extraction failed: {e}")
