@@ -177,7 +177,9 @@ def search_claim_documents(
             if not matching_files and best_file:
                 matching_files = [best_file]
         if not matching_files:
-            raise NoMatchFoundException(str(search_params))
+            provided = {k: v for k, v in search_params.items() if v}
+            raise NoMatchFoundException(f"No value matching with the keyword: {provided}")
+
 
     # 2. If only VIN is provided
     elif vin_param and not (invoice_date_param or searchbyany_param):
@@ -206,7 +208,9 @@ def search_claim_documents(
         if not matching_files and best_file:
             matching_files = [best_file]
         if not matching_files:
-            raise NoMatchFoundException(f"VIN '{vin_param}' not found.")
+            provided = {k: v for k, v in search_params.items() if v}
+            raise NoMatchFoundException(f"No value matching with the keyword: {provided}")
+
 
     # 3. If only Invoice_Date is provided
     elif invoice_date_param and not (vin_param or searchbyany_param):
@@ -218,7 +222,9 @@ def search_claim_documents(
             if invoice_date_param in all_text:
                 matching_files.append(filename)
         if not matching_files:
-            raise NoMatchFoundException(f"Invoice_Date '{invoice_date_param}' not found.")
+            provided = {k: v for k, v in search_params.items() if v}
+            raise NoMatchFoundException(f"No value matching with the keyword: {provided}")
+
 
     # 4. If only searchbyany is provided
     elif searchbyany_param and not (vin_param or invoice_date_param):
@@ -230,7 +236,9 @@ def search_claim_documents(
             if searchbyany_param in all_text:
                 matching_files.append(filename)
         if not matching_files:
-            raise NoMatchFoundException(f"searchbyany '{searchbyany_param}' not found.")
+            provided = {k: v for k, v in search_params.items() if v}
+            raise NoMatchFoundException(f"No value matching with the keyword: {provided}")
+
 
     else:
         raise NoMatchFoundException("No valid search fields provided.")

@@ -14,14 +14,19 @@ import zipfile
 import tempfile
 router = APIRouter()
 
-@router.post("/extractclaimdocuments", response_model=ExtractionResponse)
+@router.post("/extractclaimdocuments", response_model=ExtractionResponse,response_model_exclude_none=True)
 def extract_claim_documents():
     try:
         folder_path = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF"
         output_json = r"C:\Users\hitesh.paliwal\Desktop\claims_data.json"
-        Extraction_Completed, json_file = process_all_pdfs(folder_path, output_json)
+        success, json_file, message = process_all_pdfs(folder_path, output_json)
+        if not success:
+            return ExtractionResponse(
+                Extraction_Completed=False,
+                message=message
+            )
         return ExtractionResponse(
-            Extraction_Completed=Extraction_Completed
+            Extraction_Completed=True
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Extraction failed: {e}")

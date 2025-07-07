@@ -6,13 +6,11 @@ import pytesseract
 from PIL import Image
 import cv2
 import numpy as np
-import traceback
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
-# Set Tesseract path if needed
 pytesseract.pytesseract.tesseract_cmd = r'C:\Users\hitesh.paliwal\AppData\Local\Programs\Tesseract-OCR\tesseract.exe'
 
 def preprocess_image(pil_img):
-    """Convert PIL Image to OpenCV, grayscale, and binarize for better OCR."""
     img = np.array(pil_img)
     if img.ndim == 3 and img.shape[2] == 4:
         img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
@@ -23,14 +21,7 @@ def preprocess_image(pil_img):
     return Image.fromarray(thresh)
 
 def extract_text_from_pdf(pdf_path, dpi=300):
-    """
-    Extracts text from each page of a PDF.
-    Tries pdfplumber first; falls back to OCR if no text found.
-    Returns a list of text per page.
-    """
     pages_text = []
-
-    # Try digital extraction first
     try:
         with pdfplumber.open(pdf_path) as pdf:
             any_text_found = False
@@ -43,9 +34,6 @@ def extract_text_from_pdf(pdf_path, dpi=300):
                 return pages_text
     except Exception as e:
         print(f"pdfplumber failed for {pdf_path}: {e}")
-        traceback.print_exc()
-
-    # Fallback to OCR for scanned PDFs
     try:
         images = convert_from_path(pdf_path, dpi=dpi)
         pages_text = []
@@ -55,35 +43,48 @@ def extract_text_from_pdf(pdf_path, dpi=300):
             pages_text.append(ocr_text)
     except Exception as ocr_err:
         print(f"OCR failed for {pdf_path}: {ocr_err}")
-        traceback.print_exc()
-
     return pages_text
 
-def process_folder(folder_path, output_json_path, dpi=100):
-    """
-    Processes all PDFs in a folder and writes extracted text to a JSON file.
-    Returns (number_processed, total_files).
-    """
-    result = {}
+def process_single_pdf(args):
+    filename, folder_path, dpi = args
+    pdf_path = os.path.join(folder_path, filename)
+    try:
+        print(f"Processing: {filename}")
+        text = extract_text_from_pdf(pdf_path, dpi=dpi)
+        return filename, text
+    except Exception as e:
+        print(f"Failed to process {filename}: {e}")
+        return filename, None
+
+def process_folder_fast(folder_path, output_json_path, dpi=150):
     pdf_files = [f for f in os.listdir(folder_path) if f.lower().endswith('.pdf')]
+    args_list = [(filename, folder_path, dpi) for filename in pdf_files]
+    result = {}
     processed_count = 0
-    for filename in pdf_files:
-        pdf_path = os.path.join(folder_path, filename)
-        try:
-            print(f"Processing: {filename}")
-            result[filename] = extract_text_from_pdf(pdf_path, dpi=dpi)
-            processed_count += 1
-        except Exception as e:
-            print(f"Failed to process {filename}: {e}")
+    max_workers = os.cpu_count() or 4
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(process_single_pdf, args): args[0] for args in args_list}
+        for future in as_completed(futures):
+            filename, text = future.result()
+            if text is not None:
+                result[filename] = text
+                processed_count += 1
     with open(output_json_path, 'w', encoding='utf-8') as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
     print(f"Extraction complete. Output saved to {output_json_path}")
     return processed_count, len(pdf_files)
 
-
 def process_all_pdfs(folder_path: str, output_json_path: str):
-    processed_count, total_files = process_folder(folder_path, output_json_path)
+    processed_count, total_files = process_folder_fast(folder_path, output_json_path)
     if total_files == 0:
-        return False, output_json_path  # No files found
+        return False, output_json_path, ""
     percent = processed_count / total_files
-    return percent >= 0.9, output_json_path
+    return percent >= 0.9, output_json_path, ""
+
+# Example usage
+if __name__ == "__main__":
+    folder_path = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF"
+    output_json = r"C:\Users\hitesh.paliwal\Desktop\claims_data.json"
+    success, json_file = process_all_pdfs(folder_path, output_json)
+    print("Success:", success)
+    print("JSON file:", json_file)

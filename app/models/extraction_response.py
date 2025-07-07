@@ -1,5 +1,7 @@
+from typing import Optional
+
 from pydantic import BaseModel
 
 class ExtractionResponse(BaseModel):
     Extraction_Completed: bool
-    # json_file: str
+    message: Optional[str] = None
