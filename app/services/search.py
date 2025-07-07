@@ -4,7 +4,7 @@ import re
 import shutil
 from typing import Optional, List, Dict
 from difflib import SequenceMatcher
-
+import shutil
 from app.Exception.NoMatchFoundException import NoMatchFoundException
 
 AND_FIELDS = ["Dealer", "Contract", "Claim"]
@@ -77,6 +77,23 @@ def search_claim_documents(
     input_folder: str,
     json_file: str
 ) -> List[str]:
+
+    destination_folder = os.path.join(input_folder, "destination")
+    # Clear the destination folder before copying new files
+    if os.path.exists(destination_folder):
+        for filename in os.listdir(destination_folder):
+            file_path = os.path.join(destination_folder, filename)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+            except Exception as e:
+                print(f"Failed to delete {file_path}: {e}")
+    else:
+        os.makedirs(destination_folder, exist_ok=True)
+
+
     """
     Priority:
     1. If Dealer/Contract/Claim provided, search for all (AND logic). If found, return.
