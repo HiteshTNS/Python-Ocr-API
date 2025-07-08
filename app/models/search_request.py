@@ -1,12 +1,9 @@
 from typing import Optional
-
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class SearchRequest(BaseModel):
-    Dealer: Optional[str] = None
+    Dealer: Optional[str] = Field(None, alias="Dealer Name")
     VIN: Optional[str] = None
-    Contract: Optional[str] = None
-    Claim: Optional[str] = None
-    Invoice_Date: Optional[str] = None
-    searchbyany: Optional[str] = None
-
+    Contract: Optional[str] = Field(None, alias="Contract #")
+    Claim: Optional[str] = Field(None, alias="Claim #")
+    searchbyany: Optional[str] = Field(None, alias="Search by Word")
