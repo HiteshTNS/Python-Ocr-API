@@ -70,6 +70,21 @@ def get_best_fuzzy_match(target: str, candidates: List[str], threshold: float = 
         return best_candidate
     return None
 
+def clear_destination_folder(destination_folder: str):
+    """Clears all files in the destination folder before each search."""
+    if os.path.exists(destination_folder):
+        for filename in os.listdir(destination_folder):
+            file_path = os.path.join(destination_folder, filename)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+            except Exception as e:
+                print(f"Failed to delete {file_path}: {e}")
+    else:
+        os.makedirs(destination_folder, exist_ok=True)
+
 def search_claim_documents(
     search_params: Dict[str, Optional[str]],
     input_folder: str,
@@ -99,6 +114,10 @@ def search_claim_documents(
 
     with open(json_file, "r", encoding="utf-8") as f:
         data = json.load(f)
+
+    # --- Clear the destination folder before copying new files ---
+    destination_folder = os.path.join(input_folder, "destination")
+    clear_destination_folder(destination_folder)
 
     matching_files = set()  # Use a set to avoid duplicates
 
@@ -149,8 +168,6 @@ def search_claim_documents(
         raise NoMatchFoundException(f"No value matching with the keyword: {provided}")
 
     # Copy matching files to destination subfolder inside input_folder
-    destination_folder = os.path.join(input_folder, "destination")
-    os.makedirs(destination_folder, exist_ok=True)
     for filename in matching_files:
         src_path = os.path.join(input_folder, filename)
         dst_path = os.path.join(destination_folder, filename)
@@ -161,24 +178,3 @@ def search_claim_documents(
             print(f"Failed to copy {filename}: {e}")
 
     return list(matching_files)
-
-# Example usage:
-if __name__ == "__main__":
-    search_params = {
-        "Dealer Name": "",
-        "VIN": "WAUGNAF46HN038604",
-        "Contract #": "6001285079",
-        "Claim #": "71699758",
-        "Search by Word": ""
-    }
-    input_folder = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF"
-    json_file = r"C:\Users\hitesh.paliwal\Desktop\claims_data.json"
-    try:
-        matching_files = search_claim_documents(
-            search_params,
-            input_folder=input_folder,
-            json_file=json_file
-        )
-        print("Matching files:", matching_files)
-    except NoMatchFoundException as e:
-        print("No matching files found:", e)

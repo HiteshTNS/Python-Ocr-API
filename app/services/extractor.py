@@ -69,6 +69,8 @@ def process_folder_fast(folder_path, output_json_path, dpi=150):
             if text is not None:
                 result[filename] = text
                 processed_count += 1
+    output_dir = os.path.dirname(output_json_path)
+    os.makedirs(output_dir, exist_ok=True)  # Create folder if missing
     with open(output_json_path, 'w', encoding='utf-8') as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
     print(f"Extraction complete. Output saved to {output_json_path}")
