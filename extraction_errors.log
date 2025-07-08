@@ -1,0 +1,24 @@
+2025-07-08 13:30:18,813 INFO Skipping 20 already processed PDFs.
+2025-07-08 13:30:18,824 INFO Checkpoint saved to C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\Extracted_Json_Files\ExtractedData.json
+2025-07-08 13:30:31,176 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71697898.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:30:31,462 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71699758.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:30:31,546 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71699486.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:30:31,706 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71699991.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:30:31,904 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71699844.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:30:32,192 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71699596.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:30:33,248 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71700683.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:30:34,278 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71702484.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:30:35,119 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71702803.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:30:43,869 INFO Checkpoint saved to C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\Extracted_Json_Files\ExtractedData_batch1.json
+2025-07-08 13:30:43,873 INFO Checkpoint saved to C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\Extracted_Json_Files\ExtractedData.json
+2025-07-08 13:33:03,405 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71697898.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:33:05,525 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71699486.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:33:06,050 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71699596.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:33:07,880 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71699758.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:33:08,860 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71699844.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:33:09,046 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71699991.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:33:10,273 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71700683.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:33:10,900 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71702484.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:33:11,534 ERROR pdfplumber failed for C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\71702803.pdf: No /Root object! - Is this really a PDF?
+2025-07-08 13:33:17,460 INFO Checkpoint saved to C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\Extracted_Json_Files\ExtractedData_batch1.json
+2025-07-08 13:33:17,463 INFO Checkpoint saved to C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\Extracted_Json_Files\ExtractedData.json

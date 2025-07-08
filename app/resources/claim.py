@@ -33,14 +33,14 @@ def search_pdf_documents(
 ):
     folder_path = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF"
     output_json = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\Extracted_Json_Files\ExtractedData.json"
-
+    batch_size=5
     # Check if JSON file exists
     json_exists = os.path.exists(output_json)
 
     # If extraction requested or JSON missing, run extraction
     if extractDocuments or not json_exists:
         try:
-            success, json_file, message = process_all_pdfs(folder_path, output_json)
+            success, json_file, message = process_all_pdfs(folder_path, output_json,batch_size)
             return ExtractionResponse(
                 Extraction_Completed=success,
                 message=message if message else "Extraction Completed proceed with search"
