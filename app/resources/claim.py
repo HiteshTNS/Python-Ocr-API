@@ -32,7 +32,7 @@ def search_pdf_documents(
     extractDocuments: bool = Query(False, description="Set to true to trigger extraction")
 ):
     folder_path = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF"
-    output_json = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\Extracted_Json_Files\ExtractedData.json"
+    output_json = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\Extracted_Json_Files"
     batch_size=5
     # Check if JSON file exists
     json_exists = os.path.exists(output_json)
