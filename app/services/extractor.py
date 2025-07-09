@@ -87,9 +87,9 @@ def process_folder_fast(folder_path, output_json_base, batch_size,dpi=100):
                     batch_result[filename] = text
                     processed_count += 1
         # Save after each batch to a unique file
-        output_dir = os.path.dirname(output_json_base)
-        os.makedirs(output_dir, exist_ok=True)
-        batch_json_path = os.path.join(output_dir, f"ExtractedData_Batch{batch_number}.json")
+        # output_dir = os.path.dirname(output_json_base)
+        os.makedirs(output_json_base, exist_ok=True)
+        batch_json_path = os.path.join(output_json_base, f"ExtractedData_Batch{batch_number}.json")
         with open(batch_json_path, 'w', encoding='utf-8') as f:
             json.dump(batch_result, f, indent=2, ensure_ascii=False)
         logger.info("Batch %d processed and saved to %s", batch_number, batch_json_path)

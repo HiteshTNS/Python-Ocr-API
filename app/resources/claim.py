@@ -18,7 +18,7 @@ router = APIRouter()
 
 @router.post(
     "/searchPdfDocuments",
-    response_model=Union[ExtractionResponse, SearchResult],  # Can be ExtractionResponse or SearchResult
+    response_model=Union[ExtractionResponse, SearchResult],
     response_model_exclude_none=True,
     summary="Extract and/or search claim documents",
     description=(
@@ -33,24 +33,28 @@ def search_pdf_documents(
 ):
     folder_path = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF"
     output_json = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\Extracted_Json_Files"
-    batch_size=5
-    # Check if JSON file exists
-    json_exists = os.path.exists(output_json)
+    batch_size = 5
 
-    # If extraction requested or JSON missing, run extraction
-    if extractDocuments or not json_exists:
+    # Check if any JSON files exist in the output folder
+    def has_json_files(folder: str) -> bool:
+        return os.path.exists(folder) and any(
+            f.lower().endswith('.json') for f in os.listdir(folder)
+        )
+
+    # If extraction requested or no JSON files found, run extraction
+    if extractDocuments or not has_json_files(output_json):
         try:
-            success, json_file, message = process_all_pdfs(folder_path, output_json,batch_size)
+            success, json_file, message,extracted_count, total_files  = process_all_pdfs(folder_path, output_json, batch_size)
             return ExtractionResponse(
                 Extraction_Completed=success,
-                message=message if message else "Extraction Completed proceed with search"
+                message=message if message else "Extraction Completed, proceed with search",
+                Summary= f"{extracted_count} of {total_files} documents extracted"
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Extraction failed: {e}")
 
     # Otherwise, perform search
     try:
-        # Convert Pydantic model to dict and filter out empty values
         search_dict = {k: v for k, v in search_params.dict().items() if v}
         if not search_dict:
             raise HTTPException(status_code=400, detail="No search parameters provided.")
