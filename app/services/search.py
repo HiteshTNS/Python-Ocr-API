@@ -1,11 +1,19 @@
 import os
 import json
 import re
-import shutil
 import logging
+import tempfile
 from typing import Optional, List, Dict
 from difflib import SequenceMatcher
 from app.Exception.NoMatchFoundException import NoMatchFoundException
+from app.models.config import AppSettings
+from app.utils.s3_utils import (
+    get_s3_client,
+    list_jsons_in_s3,
+    download_s3_file,
+    copy_s3_file,
+    list_files_in_s3_prefix, clear_s3_prefix,
+)
 
 VIN_MIN_LENGTH = 13
 
@@ -67,25 +75,15 @@ def get_best_fuzzy_match(target: str, candidates: List[str], threshold: float = 
         return best_candidate
     return None
 
-def clear_destination_folder(destination_folder: str):
-    if os.path.exists(destination_folder):
-        for filename in os.listdir(destination_folder):
-            file_path = os.path.join(destination_folder, filename)
-            try:
-                if os.path.isfile(file_path) or os.path.islink(file_path):
-                    os.unlink(file_path)
-                elif os.path.isdir(file_path):
-                    shutil.rmtree(file_path)
-            except Exception as e:
-                logger.error(f"Failed to delete {file_path}: {e}")
-    else:
-        os.makedirs(destination_folder, exist_ok=True)
-
 def search_claim_documents(
     search_params: Dict[str, Optional[str]],
-    input_folder: str,
-    output_json_folder: str
+    settings: AppSettings
 ) -> List[str]:
+    """
+    Search for claim documents in S3 based on search_params.
+    Downloads JSONs from S3, finds matches, and copies matching PDFs from source to destination S3 bucket.
+    Returns the list of matching PDF filenames.
+    """
     field_map = {
         "Dealer Name": "Dealer",
         "Dealer": "Dealer",
@@ -97,94 +95,126 @@ def search_claim_documents(
         "Search by Word": "searchbyany",
         "searchbyany": "searchbyany"
     }
+    s3 = get_s3_client()
+    clear_s3_prefix(
+        s3,
+        bucket=settings.s3_destination_bucket,
+        prefix=""  # or a prefix if you use subfolders
+    )
+    logger.info(f"Cleared all files in destination bucket: {settings.s3_destination_bucket}")
 
     active_fields = {field_map[k]: v.strip() for k, v in search_params.items() if v and k in field_map}
     if not active_fields:
         raise NoMatchFoundException("No valid search fields provided.")
 
-    # Find all JSON files in the output_json_folder
-    json_files = [os.path.join(output_json_folder, f)
-                  for f in os.listdir(output_json_folder)
-                  if f.lower().endswith('.json')]
+    s3 = get_s3_client()
+    # List all JSON files in the S3 output prefix
+    json_keys = list_jsons_in_s3(
+        s3,
+        bucket=settings.s3_source_bucket,
+        prefix=settings.pdf_json_output_prefix
+    )
+    logger.info(f"Found {len(json_keys)} JSON files in {settings.s3_source_bucket}/{settings.pdf_json_output_prefix}")
 
-    if not json_files:
-        raise FileNotFoundError(f"No JSON files found in: {output_json_folder}")
+    if not json_keys:
+        raise FileNotFoundError(f"No JSON files found in: {settings.s3_source_bucket}/{settings.pdf_json_output_prefix}")
 
-    destination_folder = os.path.join(input_folder, "destination")
-    clear_destination_folder(destination_folder)
     matching_files = set()
 
-    for json_idx, json_file in enumerate(json_files, 1):
-        logger.info(f"Searching in JSON file {json_idx}/{len(json_files)}: {json_file}")
-        try:
-            with open(json_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception as e:
-            logger.error(f"Could not load {json_file}: {e}")
-            continue
+    for json_idx, json_key in enumerate(json_keys, 1):
+        logger.info(f"Searching in JSON file {json_idx}/{len(json_keys)}: {json_key}")
+        # Download JSON to temp file
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=True) as tmp_json:
+            download_s3_file(json_key, tmp_json.name)
+            try:
+                with open(tmp_json.name, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception as e:
+                logger.error(f"Could not load {json_key}: {e}")
+                continue
 
-        for file_idx, (filename, pages) in enumerate(data.items(), 1):
-            logger.debug(f"Searching in file {filename} from {json_file} (file {file_idx})")
-            if isinstance(pages, list):
-                all_text = "\n".join(pages)
-            else:
-                all_text = str(pages)
+            for file_idx, (filename, pages) in enumerate(data.items(), 1):
+                logger.debug(f"Searching in file {filename} from {json_key} (file {file_idx})")
+                if isinstance(pages, list):
+                    all_text = "\n".join(pages)
+                else:
+                    all_text = str(pages)
 
-            for field, value in active_fields.items():
-                found = False
-                if field == "Contract":
-                    extracted_numbers = extract_numeric_after_keyword(all_text, "Contract", min_digits=6)
-                    if any(num.strip() == value for num in extracted_numbers):
-                        found = True
-                        logger.info(f"Match found for Contract in {filename}")
-                elif field == "Claim":
-                    extracted_numbers = extract_numeric_after_keyword(all_text, "Claim", min_digits=6)
-                    if any(num.strip() == value for num in extracted_numbers):
-                        found = True
-                        logger.info(f"Match found for Claim in {filename}")
-                elif field == "VIN":
-                    vin_param_normalized = ocr_vin_normalize(re.sub(r'[^A-HJ-NPR-Z0-9]', '', value.upper()))
-                    vin_candidates_raw = find_vin_candidates(all_text)
-                    vin_candidates = [ocr_vin_normalize(v) for v in vin_candidates_raw]
-                    if vin_param_normalized in vin_candidates:
-                        found = True
-                        logger.info(f"Exact VIN match in {filename}")
-                    else:
-                        match = get_best_fuzzy_match(vin_param_normalized, vin_candidates, threshold=0.6)
-                        if match:
+                for field, value in active_fields.items():
+                    found = False
+                    if field == "Contract":
+                        extracted_numbers = extract_numeric_after_keyword(all_text, "Contract", min_digits=6)
+                        if any(num.strip() == value for num in extracted_numbers):
                             found = True
-                            logger.info(f"Fuzzy VIN match in {filename}")
-                elif field == "Dealer":
-                    pattern = re.compile(FIELD_PATTERNS["Dealer"], re.IGNORECASE)
-                    for match in pattern.finditer(all_text):
-                        extracted_value = match.group(1).strip().rstrip(':;\\').strip()
-                        extracted_value_clean = re.sub(r'\s*\d+\s*$', '', extracted_value)
-                        if value.lower() in extracted_value_clean.lower():
+                            logger.info(f"Match found for Contract in {filename}")
+                    elif field == "Claim":
+                        extracted_numbers = extract_numeric_after_keyword(all_text, "Claim", min_digits=6)
+                        if any(num.strip() == value for num in extracted_numbers):
                             found = True
-                            logger.info(f"Dealer match in {filename}")
-                            break
-                elif field == "searchbyany":
-                    if value in all_text:
-                        found = True
-                        logger.info(f"Keyword '{value}' found in {filename}")
-                if found:
-                    matching_files.add(filename)
-                    break  # No need to check other fields for this file
+                            logger.info(f"Match found for Claim in {filename}")
+                    elif field == "VIN":
+                        vin_param_normalized = ocr_vin_normalize(re.sub(r'[^A-HJ-NPR-Z0-9]', '', value.upper()))
+                        vin_candidates_raw = find_vin_candidates(all_text)
+                        vin_candidates = [ocr_vin_normalize(v) for v in vin_candidates_raw]
+                        if vin_param_normalized in vin_candidates:
+                            found = True
+                            logger.info(f"Exact VIN match in {filename}")
+                        else:
+                            match = get_best_fuzzy_match(vin_param_normalized, vin_candidates, threshold=0.6)
+                            if match:
+                                found = True
+                                logger.info(f"Fuzzy VIN match in {filename}")
+                    elif field == "Dealer":
+                        pattern = re.compile(FIELD_PATTERNS["Dealer"], re.IGNORECASE)
+                        for match in pattern.finditer(all_text):
+                            extracted_value = match.group(1).strip().rstrip(':;\\').strip()
+                            extracted_value_clean = re.sub(r'\s*\d+\s*$', '', extracted_value)
+                            if value.lower() in extracted_value_clean.lower():
+                                found = True
+                                logger.info(f"Dealer match in {filename}")
+                                break
+                    elif field == "searchbyany":
+                        if value in all_text:
+                            found = True
+                            logger.info(f"Keyword '{value}' found in {filename}")
+                    if found:
+                        matching_files.add(filename)
+                        break  # No need to check other fields for this file
+
+    logger.info(f"Matching files to copy: {matching_files}")
 
     if not matching_files:
         provided = {k: v for k, v in search_params.items() if v}
         logger.warning(f"No value matching with the keyword: {provided}")
         raise NoMatchFoundException(f"No value matching with the keyword: {provided}")
 
-    # Copy matching files to destination subfolder inside input_folder
+    # Copy matching files from source S3 bucket to destination S3 bucket
     for filename in matching_files:
-        src_path = os.path.join(input_folder, filename)
-        dst_path = os.path.join(destination_folder, filename)
+        if filename.startswith(settings.pdf_input_prefix):
+            source_key = filename
+        else:
+            source_key = os.path.join(settings.pdf_input_prefix, filename)
+        dest_key = os.path.basename(filename)  # Flat structure in destination bucket
+        logger.info(f"Attempting to copy {source_key} from {settings.s3_source_bucket} to {dest_key} in {settings.s3_destination_bucket}")
         try:
-            shutil.copy2(src_path, dst_path)
-            logger.info(f"Copied {filename} to {destination_folder}")
+            copy_s3_file(
+                s3,
+                source_bucket=settings.s3_source_bucket,
+                source_key=source_key,
+                dest_bucket=settings.s3_destination_bucket,
+                dest_key=dest_key
+            )
+            logger.info(f"Successfully copied {source_key} to {settings.s3_destination_bucket}/{dest_key}")
         except Exception as e:
-            logger.error(f"Failed to copy {filename}: {e}")
+            logger.error(f"Failed to copy {source_key} to {settings.s3_destination_bucket}/{dest_key}: {e}")
+
+    # List files in destination bucket after copy
+    dest_files = list_files_in_s3_prefix(
+        s3,
+        bucket=settings.s3_destination_bucket,
+        prefix=""
+    )
+    logger.info(f"Files in destination bucket after copy: {dest_files}")
 
     logger.info(f"Total matching files: {len(matching_files)}")
     return list(matching_files)
