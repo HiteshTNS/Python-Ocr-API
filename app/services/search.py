@@ -150,7 +150,7 @@ def search_claim_documents(
                         found = True
                         logger.info(f"Exact VIN match in {filename}")
                     else:
-                        match = get_best_fuzzy_match(vin_param_normalized, vin_candidates, threshold=0.6 )
+                        match = get_best_fuzzy_match(vin_param_normalized, vin_candidates, threshold=0.8)
                         if match:
                             found = True
                             logger.info(f"Fuzzy VIN match in {filename}")
