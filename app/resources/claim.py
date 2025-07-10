@@ -40,8 +40,8 @@ def search_pdf_documents(
     batch_size = settings.batch_size
 
     extraction_needed = extractDocuments or not has_json_files_in_s3()
-    extraction_status = "Applied" if extraction_needed else "Not Applied"
-
+    # extraction_status = "Applied" if extraction_needed else "Not Applied"
+    total_input_files = len(list_pdfs_in_s3())  # total input PDFs
     try:
         search_dict = {k: v for k, v in search_params.dict().items() if v}
         # Extraction phase
@@ -52,8 +52,8 @@ def search_pdf_documents(
                 matching_files = search_claim_documents(search_dict, settings)
                 # Count source and destination files in S3
                 s3 = get_s3_client()
-                x = len(list_pdfs_in_s3())  # total input PDFs
-                y = len(list_files_in_s3_prefix(
+
+                total_files_in_destination = len(list_files_in_s3_prefix(
                     s3,
                     bucket=settings.s3_destination_bucket,
                     prefix=""
@@ -61,7 +61,7 @@ def search_pdf_documents(
                 return {
                     "ExtractionStatus": "Applied",
                     "Message": "Extraction completed with search",
-                    "Summary": f"{y} of {x} documents moved to destination based on the search criteria",
+                    "Summary": f"{total_files_in_destination} of {total_input_files} documents moved to destination based on the search criteria",
                     "files": matching_files
                 }
             # If no search params, just return extraction summary
@@ -76,8 +76,8 @@ def search_pdf_documents(
 
         matching_files = search_claim_documents(search_dict, settings)
         s3 = get_s3_client()
-        x = len(list_pdfs_in_s3())
-        y = len(list_files_in_s3_prefix(
+        # x = len(list_pdfs_in_s3())
+        total_files_in_destination = len(list_files_in_s3_prefix(
             s3,
             bucket=settings.s3_destination_bucket,
             prefix=""
@@ -85,7 +85,7 @@ def search_pdf_documents(
         return {
             "ExtractionStatus": "Not Applied",
             "Message": "Extraction completed with search",
-            "Summary": f"{y} of {x} documents moved to destination based on the search criteria",
+            "Summary": f"{total_files_in_destination} of {total_input_files} documents moved to destination based on the search criteria",
             "files": matching_files
         }
     except NoMatchFoundException as e:
