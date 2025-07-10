@@ -28,9 +28,11 @@ def search_pdf_documents(
     output_json = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\Extracted_Json_Files"
     output_destination_folder = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\destination"
     batch_size = 5
+    total_input_files = len([f for f in os.listdir(folder_path) if f.lower().endswith('.pdf')])
+    total_output_files = len([f for f in os.listdir(output_destination_folder) if f.lower().endswith('.pdf')])
 
     extraction_needed = extractDocuments or not has_json_files(output_json)
-    extraction_status = "Applied" if extraction_needed else "Not Applied"
+    # extraction_status = "Applied" if extraction_needed else "Not Applied"
 
     try:
         search_dict = {k: v for k, v in search_params.dict().items() if v}
@@ -41,13 +43,12 @@ def search_pdf_documents(
             )
             # If search params provided, perform search after extraction
             if search_dict:
-                x = len([f for f in os.listdir(folder_path) if f.lower().endswith('.pdf')])
                 matching_files = search_claim_documents(search_dict, folder_path, output_json)
-                y = len([f for f in os.listdir(output_destination_folder) if f.lower().endswith('.pdf')])
                 return {
                     "ExtractionStatus": "Applied",
+                    "Extraction_Completed":f"{success}",
                     "Message": "Extraction completed with search",
-                    "Summary": f"{y} of {x} documents moved to destination based on the search criteria",
+                    "Summary": f"{total_output_files} of {total_input_files} documents moved to destination based on the search criteria",
                     "files": matching_files
                 }
             # If no search params, just return extraction summary
@@ -60,14 +61,11 @@ def search_pdf_documents(
         if not search_dict:
             raise HTTPException(status_code=400, detail="No search parameters provided.")
 
-        x = len([f for f in os.listdir(folder_path) if f.lower().endswith('.pdf')])
         matching_files = search_claim_documents(search_dict, folder_path, output_json)
-        y = len([f for f in os.listdir(output_destination_folder) if f.lower().endswith('.pdf')])
-
         return {
             "ExtractionStatus": "Not Applied",
             "Message": "Extraction completed with search",
-            "Summary": f"{y} of {x} documents moved to destination based on the search criteria",
+            "Summary": f"{total_output_files} of {total_input_files} documents moved to destination based on the search criteria",
             "files": matching_files
         }
     except NoMatchFoundException as e:
