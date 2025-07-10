@@ -29,7 +29,7 @@ def search_pdf_documents(
     output_destination_folder = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\destination"
     batch_size = 5
     total_input_files = len([f for f in os.listdir(folder_path) if f.lower().endswith('.pdf')])
-    total_output_files = len([f for f in os.listdir(output_destination_folder) if f.lower().endswith('.pdf')])
+    # total_output_files = len([f for f in os.listdir(output_destination_folder) if f.lower().endswith('.pdf')])
 
     extraction_needed = extractDocuments or not has_json_files(output_json)
     # extraction_status = "Applied" if extraction_needed else "Not Applied"
@@ -44,6 +44,7 @@ def search_pdf_documents(
             # If search params provided, perform search after extraction
             if search_dict:
                 matching_files = search_claim_documents(search_dict, folder_path, output_json)
+                total_output_files = len([f for f in os.listdir(output_destination_folder) if f.lower().endswith('.pdf')])
                 return {
                     "ExtractionStatus": "Applied",
                     "Extraction_Completed":f"{success}",
@@ -62,6 +63,7 @@ def search_pdf_documents(
             raise HTTPException(status_code=400, detail="No search parameters provided.")
 
         matching_files = search_claim_documents(search_dict, folder_path, output_json)
+        total_output_files = len([f for f in os.listdir(output_destination_folder) if f.lower().endswith('.pdf')])
         return {
             "ExtractionStatus": "Not Applied",
             "Message": "Extraction completed with search",
