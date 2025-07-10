@@ -16,7 +16,8 @@ from app.utils.s3_utils import (
     list_files_in_s3_prefix,
     download_s3_file,
 )
-
+from fastapi.responses import FileResponse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 router = APIRouter()
 
 env_profile = os.environ.get("APP_PROFILE", "uat")  # default to uat
@@ -93,6 +94,10 @@ def search_pdf_documents(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+
+
 @router.get("/download/all")
 def download_all_files():
     """
@@ -100,7 +105,6 @@ def download_all_files():
     """
     s3 = get_s3_client()
     try:
-        # List all files in the destination bucket
         files = list_files_in_s3_prefix(
             s3,
             bucket=settings.s3_destination_bucket,
@@ -109,20 +113,31 @@ def download_all_files():
         if not files:
             raise HTTPException(status_code=404, detail="No files to download.")
 
-        # Download all files to a temp dir and zip them
         with tempfile.TemporaryDirectory() as tmpdir:
-            for key in files:
+            def download_file(key):
                 local_path = os.path.join(tmpdir, os.path.basename(key))
                 s3.download_file(settings.s3_destination_bucket, key, local_path)
+                return local_path
+
+            # Download files in parallel
+            max_workers = min(16, os.cpu_count() or 4, len(files))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(download_file, key) for key in files]
+                for future in as_completed(futures):
+                    future.result()  # Raise exceptions if any
+
             # Create a zip in a temp file
             with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmpzip:
                 with zipfile.ZipFile(tmpzip.name, 'w') as zipf:
                     for fname in os.listdir(tmpdir):
                         zipf.write(os.path.join(tmpdir, fname), arcname=fname)
                 tmpzip_path = tmpzip.name
+
         return FileResponse(path=tmpzip_path, filename="destination_files.zip", media_type='application/zip')
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 @router.get("/healthcheck")
 def healthcheck():
