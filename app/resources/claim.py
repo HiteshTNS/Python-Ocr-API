@@ -1,144 +1,59 @@
-import os
+from fastapi import APIRouter, HTTPException
 import tempfile
-import zipfile
-from fastapi import APIRouter, Query, HTTPException, Body
-from typing import List
-from starlette.responses import FileResponse
-from app.models.search_request import SearchRequest
-from app.Exception.NoMatchFoundException import NoMatchFoundException
-from app.services.process_all_pdfs import process_all_pdfs
-from app.services.search import search_claim_documents
-from app.models.config import AppSettings
-from app.utils.s3_utils import (
-    get_s3_client,
-    list_pdfs_in_s3,
-    list_jsons_in_s3,
-    list_files_in_s3_prefix,
-    download_s3_file,
-)
-from fastapi.responses import FileResponse
-from concurrent.futures import ThreadPoolExecutor, as_completed
-router = APIRouter()
+import os
+import logging
 
-env_profile = os.environ.get("APP_PROFILE", "uat")  # default to uat
+from app.models.config import AppSettings
+from app.services.extractor import extract_text_from_pdf
+from app.services.search import search_keywords_in_pdf
+from app.utils.s3_utils import download_s3_file
+from app.models.OCRSearchRequest import OCRSearchRequest
+
+env_profile = os.environ.get("APP_PROFILE", "uat")
 env_file = f".env.{env_profile}"
 settings = AppSettings(_env_file=env_file)
 
-def has_json_files_in_s3():
-    s3 = get_s3_client()
-    json_keys = list_jsons_in_s3(
-        s3,
-        bucket=settings.s3_source_bucket,
-        prefix=settings.pdf_json_output_prefix
-    )
-    return len(json_keys) > 0
+router = APIRouter()
+logger = logging.getLogger(__name__)
 
-@router.post("/searchPdfDocuments")
-def search_pdf_documents(
-    search_params: SearchRequest = Body(default={}),
-    extractDocuments: bool = Query(False, description="Set to true to trigger extraction")
-):
-    batch_size = settings.batch_size
+@router.post("/getDocumentwithOCRSearchPyMuPdf")
+def get_document_with_ocr_search(request: OCRSearchRequest):
+    file_id = request.file_Id
+    keywords = request.keywords
 
-    extraction_needed = extractDocuments or not has_json_files_in_s3()
-    # extraction_status = "Applied" if extraction_needed else "Not Applied"
-    total_input_files = len(list_pdfs_in_s3())  # total input PDFs
+    # Use prefix if defined
+    # if hasattr(settings, "pdf_input_prefix") and settings.pdf_input_prefix:
+    #     pdf_s3_key = os.path.join(settings.pdf_input_prefix, f"{file_id}.pdf")
+    # else:
+    pdf_s3_key = f"{file_id}.pdf"
+
+    # Windows-safe temp file handling
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
+        tmp_pdf_path = tmp_pdf.name
+
     try:
-        search_dict = {k: v for k, v in search_params.dict().items() if v}
-        # Extraction phase
-        if extraction_needed:
-            success, message, extracted_count, total_files = process_all_pdfs(batch_size)
-            if search_dict:
-                # After extraction, perform search if search params provided
-                matching_files = search_claim_documents(search_dict, settings)
-                # Count source and destination files in S3
-                s3 = get_s3_client()
+        # Download the PDF from S3
+        try:
+            download_s3_file(pdf_s3_key, tmp_pdf_path, settings=settings)
+        except Exception as e:
+            logger.error(f"Failed to download PDF from S3: {e}")
+            raise HTTPException(status_code=404, detail=f"PDF not found: {pdf_s3_key}")
 
-                total_files_in_destination = len(list_files_in_s3_prefix(
-                    s3,
-                    bucket=settings.s3_destination_bucket,
-                    prefix=""
-                ))  # total moved to destination
-                return {
-                    "ExtractionStatus": "Applied",
-                    "Message": "Extraction completed with search",
-                    "Summary": f"{total_files_in_destination} of {total_input_files} documents moved to destination based on the search criteria",
-                    "files": matching_files
-                }
-            # If no search params, just return extraction summary
-            return {
-                "Extraction_Completed": f"{success}",
-                "Message": message if message else "Extraction Completed, proceed with search",
-                "Summary": f"{extracted_count} of {total_files} documents extracted",
-            }
-        # Only search phase
-        if not search_dict:
-            raise HTTPException(status_code=400, detail="No search parameters provided.")
+        # Extract all page text (list of strings)
+        all_page_text = extract_text_from_pdf(tmp_pdf_path)
 
-        matching_files = search_claim_documents(search_dict, settings)
-        s3 = get_s3_client()
-        # x = len(list_pdfs_in_s3())
-        total_files_in_destination = len(list_files_in_s3_prefix(
-            s3,
-            bucket=settings.s3_destination_bucket,
-            prefix=""
-        ))
-        return {
-            "ExtractionStatus": "Not Applied",
-            "Message": "Extraction completed with search",
-            "Summary": f"{total_files_in_destination} of {total_input_files} documents moved to destination based on the search criteria",
-            "files": matching_files
-        }
-    except NoMatchFoundException as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Search for keywords and format response
+        search_response = search_keywords_in_pdf(all_page_text, keywords)
 
-
-
-
-
-@router.get("/download/all")
-def download_all_files():
-    """
-    Downloads all files from the destination S3 bucket as a zip and returns it as a response.
-    """
-    s3 = get_s3_client()
-    try:
-        files = list_files_in_s3_prefix(
-            s3,
-            bucket=settings.s3_destination_bucket,
-            prefix=""
-        )
-        if not files:
-            raise HTTPException(status_code=404, detail="No files to download.")
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            def download_file(key):
-                local_path = os.path.join(tmpdir, os.path.basename(key))
-                s3.download_file(settings.s3_destination_bucket, key, local_path)
-                return local_path
-
-            # Download files in parallel
-            max_workers = min(16, os.cpu_count() or 4, len(files))
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = [executor.submit(download_file, key) for key in files]
-                for future in as_completed(futures):
-                    future.result()  # Raise exceptions if any
-
-            # Create a zip in a temp file
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmpzip:
-                with zipfile.ZipFile(tmpzip.name, 'w') as zipf:
-                    for fname in os.listdir(tmpdir):
-                        zipf.write(os.path.join(tmpdir, fname), arcname=fname)
-                tmpzip_path = tmpzip.name
-
-        return FileResponse(path=tmpzip_path, filename="destination_files.zip", media_type='application/zip')
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
-@router.get("/healthcheck")
-def healthcheck():
-    return {"status": "ok"}
+        return search_response
+    finally:
+        # Remove the PDF from S3 and local temp file
+        try:
+            # delete_s3_file(pdf_s3_key, settings=settings)
+            print("File deleted log")
+        except Exception:
+            pass
+        try:
+            os.remove(tmp_pdf_path)
+        except Exception:
+            pass

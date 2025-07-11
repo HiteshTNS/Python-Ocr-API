@@ -1,0 +1,16 @@
+import tempfile
+
+# Create a temp file, get its name, and close it immediately
+with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
+    tmp_pdf_path = tmp_pdf.name
+
+# Now download from S3 into this path (file is NOT open)
+download_s3_file(s3_key, tmp_pdf_path, settings=settings)
+
+# Now you can open/read/process the file as needed
+# ... your code ...
+
+# Clean up
+os.remove(tmp_pdf_path)
+
+
