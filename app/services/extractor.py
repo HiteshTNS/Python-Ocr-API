@@ -6,8 +6,8 @@ import cv2
 import numpy as np
 import tempfile
 import re
-from concurrent.futures import ProcessPoolExecutor
-
+from concurrent.futures import ThreadPoolExecutor
+import pdfplumber
 from app.models.config import AppSettings
 from app.utils.s3_utils import download_s3_file
 
@@ -58,49 +58,42 @@ def pdf_to_images(pdf_path, dpi=DPI):
         logger.error("Rendering failed for %s: %s", pdf_path, e)
         return []
 
-def pixmap_to_png_bytes(pix):
-    return pix.tobytes("png")
-
-def ocr_page_from_bytes(png_bytes):
+def process_page(pix):
     try:
-        img_array = cv2.imdecode(np.frombuffer(png_bytes, np.uint8), cv2.IMREAD_COLOR)
-        img = fast_preprocess(img_array)
-        return pytesseract.image_to_string(img, config=TESSERACT_CONFIG)
+        img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
+        img = fast_preprocess(img)
+        text = pytesseract.image_to_string(img, config=TESSERACT_CONFIG)
+        return clean_ocr_text(text)
     except Exception as e:
         logger.error("OCR failed: %s", e)
         return ""
 
-def extract_text_from_pdf(pdf_path, dpi=DPI, processes=None):
+def extract_text_from_pdf(pdf_path, THREADS=16):
     """
-    Extracts text from a PDF, using OCR for scanned PDFs.
-    Uses multiprocessing for OCR on scanned pages.
+    Extract text from PDF using pdfplumber for digital or OCR for scanned.
+    Returns a list of cleaned page texts.
     """
     try:
         if is_digital_pdf(pdf_path):
-            logger.info(f"Processing digital PDF: {pdf_path}")
-            with fitz.open(pdf_path) as doc:
-                return [clean_ocr_text(page.get_text()) for page in doc]
+            logger.info(f"Processing digital PDF with pdfplumber: {pdf_path}")
+            try:
+                with pdfplumber.open(pdf_path) as pdf:
+                    return [clean_ocr_text(page.extract_text() or "") for page in pdf.pages]
+            except Exception as e:
+                logger.warning(f"pdfplumber failed for {pdf_path}, falling back to fitz: {e}")
+                with fitz.open(pdf_path) as doc:
+                    return [clean_ocr_text(page.get_text()) for page in doc]
         else:
             logger.info(f"Processing scanned PDF with OCR: {pdf_path}")
-            pixmaps = pdf_to_images(pdf_path, dpi=dpi)
-            png_bytes_list = [pixmap_to_png_bytes(pix) for pix in pixmaps]
-            with ProcessPoolExecutor(max_workers=processes) as executor:
-                texts = list(executor.map(ocr_page_from_bytes, png_bytes_list))
-            cleaned_texts = [clean_ocr_text(page) for page in texts]
-            return cleaned_texts
+            pixmaps = pdf_to_images(pdf_path)
+            with ThreadPoolExecutor(max_workers=THREADS) as executor:
+                texts = list(executor.map(process_page, pixmaps))
+            return texts
     except Exception as e:
         logger.error("Failed to extract text from %s: %s", pdf_path, e)
         return []
 
-def extract_pdf_text_from_s3(s3_key, dpi=DPI, processes=None):
+def extract_pdf_text_from_s3(s3_key, THREADS=16):
     with tempfile.NamedTemporaryFile(suffix='.pdf', delete=True) as tmp_pdf:
         download_s3_file(s3_key, tmp_pdf.name, settings=settings)
-        return extract_text_from_pdf(tmp_pdf.name, dpi=dpi, processes=processes)
-
-# Example usage:
-if __name__ == "__main__":
-    # For testing only, not for FastAPI runtime
-    s3_key = "your_prefix/yourfile.pdf"
-    texts = extract_pdf_text_from_s3(s3_key, dpi=200, processes=4)
-    for i, page in enumerate(texts, 1):
-        print(f"--- Page {i} ---\n{page}\n")
+        return extract_text_from_pdf(tmp_pdf.name, THREADS=THREADS)
