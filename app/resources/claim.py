@@ -14,7 +14,7 @@ from app.models.OCRSearchRequest import OCRSearchRequest
 env_profile = os.environ.get("APP_PROFILE", "uat")
 env_file = f".env.{env_profile}"
 settings = AppSettings(_env_file=env_file)
-
+enviornment=settings.enviornment
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ def get_document_with_ocr_search(request: OCRSearchRequest):
         except Exception as e:
             logger.error(f"Failed to download PDF from S3: {e}")
             raise HTTPException(status_code=404, detail=f"PDF not found: {pdf_s3_key}")
+        print("Running From :"+ enviornment)
         start_time = time.time()
         all_page_text = extract_text_from_pdf(tmp_pdf_path)
         print("============================Extracted Text =========================")

@@ -9,7 +9,5 @@ class AppSettings(BaseSettings):
     pdf_input_prefix: str
     pdf_json_output_prefix: str
     batch_size: int
-    class Config:
-        env_file = ".env.uat"  # This can be overridden dynamically
-
+    enviornment:str
 settings = AppSettings()
