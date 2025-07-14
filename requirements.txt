@@ -1,0 +1,8 @@
+ torch>=2.0
+numpy
+pymupdf
+pdfplumber
+python-doctr
+Pillow
+opencv-python-headless  # Optional, but useful if using OpenCV somewhere
+python-dotenv  # If your AppSettings uses .env config files

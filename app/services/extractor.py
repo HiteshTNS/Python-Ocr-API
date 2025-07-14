@@ -1,4 +1,4 @@
-# extractor.py
+ # extractor.py
 
 import os
 import logging
@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 import tempfile
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import pdfplumber
 from doctr.io import DocumentFile
 from doctr.models import ocr_predictor
@@ -26,9 +26,10 @@ logging.basicConfig(
     format="%(asctime)s - %(threadName)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-DPI = 200  # Lowered for speed, increase if needed
+DPI = 200
 TESSERACT_CONFIG = '--oem 1 --psm 6 -c preserve_interword_spaces=1'
 MIN_TEXT_LENGTH = 50
+THREADS = os.cpu_count() or 8
 
 ocr_model = ocr_predictor(pretrained=True)
 
@@ -57,7 +58,9 @@ def is_digital_pdf(pdf_path):
 def pdf_to_images(pdf_path, dpi=DPI):
     try:
         doc = fitz.open(pdf_path)
-        return [doc.load_page(i).get_pixmap(dpi=dpi) for i in range(len(doc))]
+        with ThreadPoolExecutor(max_workers=min(THREADS, len(doc))) as executor:
+            pixmaps = list(executor.map(lambda i: doc.load_page(i).get_pixmap(dpi=dpi), range(len(doc))))
+        return pixmaps
     except Exception as e:
         logger.error("Rendering failed for %s: %s", pdf_path, e)
         return []
@@ -83,7 +86,15 @@ def process_page_with_doctr(pix):
         return ""
 
 
-def extract_text_from_pdf(pdf_path, THREADS=16):
+def process_digital_page(page):
+    try:
+        return clean_ocr_text(page.extract_text() or "")
+    except Exception as e:
+        logger.warning(f"Failed to extract page text with pdfplumber: {e}")
+        return ""
+
+
+def extract_text_from_pdf(pdf_path):
     """
     Extract text from PDF using pdfplumber for digital or OCR with DocTR for scanned.
     Returns a list of cleaned page texts.
@@ -93,7 +104,9 @@ def extract_text_from_pdf(pdf_path, THREADS=16):
             logger.info(f"Processing digital PDF with pdfplumber: {pdf_path}")
             try:
                 with pdfplumber.open(pdf_path) as pdf:
-                    return [clean_ocr_text(page.extract_text() or "") for page in pdf.pages]
+                    with ThreadPoolExecutor(max_workers=min(THREADS, len(pdf.pages))) as executor:
+                        results = list(executor.map(process_digital_page, pdf.pages))
+                    return results
             except Exception as e:
                 logger.warning(f"pdfplumber failed for {pdf_path}, falling back to fitz: {e}")
                 with fitz.open(pdf_path) as doc:
@@ -101,16 +114,15 @@ def extract_text_from_pdf(pdf_path, THREADS=16):
         else:
             logger.info(f"Processing scanned PDF with DocTR OCR: {pdf_path}")
             pixmaps = pdf_to_images(pdf_path)
-            with ThreadPoolExecutor(max_workers=THREADS) as executor:
-                texts = list(executor.map(process_page_with_doctr, pixmaps))
-
-            return texts
+            with ThreadPoolExecutor(max_workers=min(THREADS, len(pixmaps))) as executor:
+                results = list(executor.map(process_page_with_doctr, pixmaps))
+            return results
     except Exception as e:
         logger.error("Failed to extract text from %s: %s", pdf_path, e)
         return []
 
 
-def extract_pdf_text_from_s3(s3_key, THREADS=16):
+def extract_pdf_text_from_s3(s3_key):
     with tempfile.NamedTemporaryFile(suffix='.pdf', delete=True) as tmp_pdf:
         download_s3_file(s3_key, tmp_pdf.name, settings=settings)
-        return extract_text_from_pdf(tmp_pdf.name, THREADS=THREADS)
+        return extract_text_from_pdf(tmp_pdf.name)
