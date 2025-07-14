@@ -45,7 +45,8 @@ def get_document_with_ocr_search(request: OCRSearchRequest):
             raise HTTPException(status_code=404, detail=f"PDF not found: {pdf_s3_key}")
         start_time = time.time()
         all_page_text = extract_text_from_pdf(tmp_pdf_path)
-
+        print("============================Extracted Text =========================")
+        print(all_page_text)
         search_response = search_keywords_in_pdf(
             all_page_text, keywords, return_only_filtered
         )
