@@ -85,9 +85,13 @@ def extract_text_from_pdf(pdf_path, THREADS=16):
                     return [clean_ocr_text(page.get_text()) for page in doc]
         else:
             logger.info(f"Processing scanned PDF with OCR: {pdf_path}")
+
             pixmaps = pdf_to_images(pdf_path)
+
             with ThreadPoolExecutor(max_workers=THREADS) as executor:
+
                 texts = list(executor.map(process_page, pixmaps))
+                
             return texts
     except Exception as e:
         logger.error("Failed to extract text from %s: %s", pdf_path, e)
