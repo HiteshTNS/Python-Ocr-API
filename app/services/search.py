@@ -43,7 +43,7 @@ def search_keywords_in_pdf(
     if not return_only_filtered:
         return {
             "imageToTextSearchResponse": imageToTextSearchResponse,
-            "imageToTextfullResponse": "\n".join(all_page_text)
+            "imageToTextfullResponse": " ".join([t.replace('\n', ' ') for t in all_page_text])
         }
     else:
         return {
