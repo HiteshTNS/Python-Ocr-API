@@ -3,30 +3,45 @@ from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
-def search_keywords_in_pdf(all_page_text: List[str], keywords: List[str]) -> Dict:
-    keyword_results = {}
-    matching_pages_set = set()
+def search_keywords_in_pdf(
+    all_page_text: List[str], keywords: List[str], return_only_filtered: bool = False
+) -> Dict:
+    imageToTextSearchResponse = []
+    any_keyword_found = False
 
-    # 1. Find filtered pages for each keyword
-    for keyword in keywords:
-        filtered_pages = []
-        for idx, page_text in enumerate(all_page_text):
-            if keyword.lower() in page_text.lower():
-                filtered_pages.append(idx + 1)  # Page numbers are 1-based
-                matching_pages_set.add(idx)
-        keyword_results[keyword] = {"filtered_pages": filtered_pages}
+    for idx, page_text in enumerate(all_page_text):
+        matched_keywords = [kw for kw in keywords if kw.lower() in page_text.lower()]
+        keywordMatched = bool(matched_keywords)
+        any_keyword_found = any_keyword_found or keywordMatched
 
-    # 2. Prepare page_data for only matching pages
-    page_data = [
-        {"page_no": idx + 1, "page_text": all_page_text[idx]}
-        for idx in sorted(matching_pages_set)
-    ]
+        # If returnOnlyFilteredPages is True, only include matched pages
+        if return_only_filtered and not keywordMatched:
+            continue
 
-    # 3. Concatenate all page texts for imageToTextFullResponse
-    imageToTextFullResponse = "\n".join(all_page_text)
+        imageToTextSearchResponse.append({
+            "pageNO": idx + 1,
+            "keywordMatched": keywordMatched,
+            "selectedKeywords": "|".join(matched_keywords) if keywordMatched else ("NOT FOUND" if not keywordMatched else ""),
+            "pageContent": page_text if (not return_only_filtered or keywordMatched) else None
+        })
 
-    return {
-        "keywords": keyword_results,
-        "page_data": page_data,
-        "imageToTextFullResponse": imageToTextFullResponse
-    }
+    # If no keywords found on any page, return special response
+    if not any_keyword_found:
+        return {
+            "imageToTextSearchResponse": {
+                "keywordMatched": False,
+                "selectedKeywords": "NOT FOUND",
+                "pageContent": "null"
+            }
+        }
+
+    # If returnOnlyFilteredPages is False, add full response
+    if not return_only_filtered:
+        return {
+            "imageToTextSearchResponse": imageToTextSearchResponse,
+            "imageToTextfullResponse": "\n".join(all_page_text)
+        }
+    else:
+        return {
+            "imageToTextSearchResponse": imageToTextSearchResponse
+        }
