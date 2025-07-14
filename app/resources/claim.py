@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 @router.post("/getDocumentwithOCRSearchPyMuPdf")
 def get_document_with_ocr_search(request: OCRSearchRequest):
     file_id = request.file_Id
+    if file_id.lower().endswith('.pdf'):
+        file_id = file_id[:-4]
     keywords_str = request.keywords
     return_only_filtered = getattr(request, "returnOnlyFilteredPages", False)
 
