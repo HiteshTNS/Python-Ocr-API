@@ -4,31 +4,35 @@ from typing import List, Dict
 logger = logging.getLogger(__name__)
 
 def search_keywords_in_pdf(
-    all_page_text: List[str], keywords: List[str], return_only_filtered: bool = False
-) -> Dict:
+    all_page_text: list, keywords: list, return_only_filtered: bool = False
+) -> dict:
     imageToTextSearchResponse = []
     any_keyword_found = False
 
     for idx, page_text in enumerate(all_page_text):
         matched_keywords = [kw for kw in keywords if kw.lower() in page_text.lower()]
-        keywordMatched = bool(matched_keywords)
-        any_keyword_found = any_keyword_found or keywordMatched
-
-        # If returnOnlyFilteredPages is True, only include matched pages
-        if return_only_filtered and not keywordMatched:
-            continue
-
-        imageToTextSearchResponse.append({
-            "pageNO": idx + 1,
-            "keywordMatched": keywordMatched,
-            "selectedKeywords": "|".join(matched_keywords) if keywordMatched else ("NOT FOUND" if not keywordMatched else ""),
-            "pageContent": page_text if (not return_only_filtered or keywordMatched) else None
-        })
+        if matched_keywords:
+            any_keyword_found = True
+            imageToTextSearchResponse.append({
+                "pageNO": idx + 1,
+                "keywordMatched": True,
+                "selectedKeywords": "|".join(matched_keywords),
+                "pageContent": page_text
+            })
+        # elif not return_only_filtered:
+        #     # Only include non-matching pages if returnOnlyFilteredPages is False
+        #     imageToTextSearchResponse.append({
+        #         "pageNO": idx + 1,
+        #         "keywordMatched": False,
+        #         "selectedKeywords": "",
+        #         "pageContent": page_text
+        #     })
 
     # If no keywords found on any page, return special response
     if not any_keyword_found:
         return {
             "imageToTextSearchResponse": {
+                "pageNO": 1,
                 "keywordMatched": False,
                 "selectedKeywords": "NOT FOUND",
                 "pageContent": "null"
