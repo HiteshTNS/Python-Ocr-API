@@ -32,7 +32,6 @@ def search_keywords_in_pdf(
     if not any_keyword_found:
         return {
             "imageToTextSearchResponse": {
-                "pageNO": 1,
                 "keywordMatched": False,
                 "selectedKeywords": "NOT FOUND",
                 "pageContent": "null"

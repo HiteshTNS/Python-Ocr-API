@@ -6,7 +6,7 @@ import logging
 from app.models.config import AppSettings
 from app.services.extractor import extract_text_from_pdf
 from app.services.search import search_keywords_in_pdf
-from app.utils.s3_utils import download_s3_file
+from app.utils.s3_utils import download_s3_file, delete_s3_file
 from app.models.OCRSearchRequest import OCRSearchRequest
 
 env_profile = os.environ.get("APP_PROFILE", "uat")
