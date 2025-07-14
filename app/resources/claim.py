@@ -1,3 +1,5 @@
+import time
+
 from fastapi import APIRouter, HTTPException
 import tempfile
 import os
@@ -42,12 +44,16 @@ def get_document_with_ocr_search(request: OCRSearchRequest):
             logger.error(f"Failed to download PDF from S3: {e}")
             raise HTTPException(status_code=404, detail=f"PDF not found: {pdf_s3_key}")
 
-        all_page_text = extract_text_from_pdf(tmp_pdf_path)
+        start_time = time.time()
 
+        all_page_text = extract_text_from_pdf(tmp_pdf_path)
+        print("============================Extracted Text =========================")
+        print(all_page_text)
         search_response = search_keywords_in_pdf(
             all_page_text, keywords, return_only_filtered
         )
-
+        end_time = time.time()
+        print(f"PDF processing and search took {end_time - start_time:.2f} seconds")
         return search_response
     finally:
         # Remove the PDF from S3 and local temp file

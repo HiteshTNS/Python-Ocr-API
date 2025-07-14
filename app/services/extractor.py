@@ -103,6 +103,7 @@ def extract_text_from_pdf(pdf_path, THREADS=16):
             pixmaps = pdf_to_images(pdf_path)
             with ThreadPoolExecutor(max_workers=THREADS) as executor:
                 texts = list(executor.map(process_page_with_doctr, pixmaps))
+
             return texts
     except Exception as e:
         logger.error("Failed to extract text from %s: %s", pdf_path, e)

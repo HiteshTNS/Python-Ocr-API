@@ -1,15 +1,19 @@
+# search.py
+
 import logging
 from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
+
 def search_keywords_in_pdf(
-    all_page_text: list, keywords: list, return_only_filtered: bool = False
-) -> dict:
+        all_page_text: List[str], keywords: List[str], return_only_filtered: bool = False
+) -> Dict:
     imageToTextSearchResponse = []
     any_keyword_found = False
 
     for idx, page_text in enumerate(all_page_text):
+        # Ensure full keyword match, not per character
         matched_keywords = [kw for kw in keywords if kw.lower() in page_text.lower()]
         if matched_keywords:
             any_keyword_found = True
@@ -19,16 +23,7 @@ def search_keywords_in_pdf(
                 "selectedKeywords": "|".join(matched_keywords),
                 "pageContent": page_text
             })
-        # elif not return_only_filtered:
-        #     # Only include non-matching pages if returnOnlyFilteredPages is False
-        #     imageToTextSearchResponse.append({
-        #         "pageNO": idx + 1,
-        #         "keywordMatched": False,
-        #         "selectedKeywords": "",
-        #         "pageContent": page_text
-        #     })
 
-    # If no keywords found on any page, return special response
     if not any_keyword_found:
         return {
             "imageToTextSearchResponse": {
@@ -38,7 +33,6 @@ def search_keywords_in_pdf(
             }
         }
 
-    # If returnOnlyFilteredPages is False, add full response
     if not return_only_filtered:
         return {
             "imageToTextSearchResponse": imageToTextSearchResponse,
