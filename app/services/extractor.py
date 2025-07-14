@@ -1,3 +1,5 @@
+# extractor.py
+
 import os
 import logging
 import pytesseract
@@ -8,6 +10,8 @@ import tempfile
 import re
 from concurrent.futures import ThreadPoolExecutor
 import pdfplumber
+from doctr.io import DocumentFile
+from doctr.models import ocr_predictor
 from app.models.config import AppSettings
 from app.utils.s3_utils import download_s3_file
 
@@ -19,19 +23,22 @@ settings = AppSettings(_env_file=env_file)
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(threadName)s - %(levelname)s - %(message)s"
-)
+    format="%(asctime)s - %(threadName)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 DPI = 200  # Lowered for speed, increase if needed
 TESSERACT_CONFIG = '--oem 1 --psm 6 -c preserve_interword_spaces=1'
 MIN_TEXT_LENGTH = 50
 
+ocr_model = ocr_predictor(pretrained=True)
+
+
 def clean_ocr_text(text: str) -> str:
     text = re.sub(r'[ \t]+', ' ', text)
     text = re.sub(r'\n+', '\n', text)
     text = re.sub(r'^[ \t]+|[ \t]+$', '', text, flags=re.MULTILINE)
     return text.strip()
+
 
 def is_digital_pdf(pdf_path):
     try:
@@ -46,9 +53,6 @@ def is_digital_pdf(pdf_path):
         logger.error(f"Error checking PDF type for {pdf_path}: {str(e)}")
         return False
 
-def fast_preprocess(img_array):
-    gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-    return cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
 
 def pdf_to_images(pdf_path, dpi=DPI):
     try:
@@ -58,19 +62,30 @@ def pdf_to_images(pdf_path, dpi=DPI):
         logger.error("Rendering failed for %s: %s", pdf_path, e)
         return []
 
-def process_page(pix):
+
+def process_page_with_doctr(pix):
     try:
-        img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
-        img = fast_preprocess(img)
-        text = pytesseract.image_to_string(img, config=TESSERACT_CONFIG)
-        return clean_ocr_text(text)
+        image = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
+        result = ocr_model([image])
+        export_data = result.export()
+        blocks = export_data['pages'][0]['blocks']
+
+        text_lines = []
+        for block in blocks:
+            for line in block['lines']:
+                words = [word.get('value', '') for word in line.get('words', [])]
+                line_text = " ".join(words)
+                text_lines.append(line_text)
+
+        return clean_ocr_text("\n".join(text_lines))
     except Exception as e:
-        logger.error("OCR failed: %s", e)
+        logger.error("DocTR OCR failed: %s", e)
         return ""
+
 
 def extract_text_from_pdf(pdf_path, THREADS=16):
     """
-    Extract text from PDF using pdfplumber for digital or OCR for scanned.
+    Extract text from PDF using pdfplumber for digital or OCR with DocTR for scanned.
     Returns a list of cleaned page texts.
     """
     try:
@@ -84,14 +99,15 @@ def extract_text_from_pdf(pdf_path, THREADS=16):
                 with fitz.open(pdf_path) as doc:
                     return [clean_ocr_text(page.get_text()) for page in doc]
         else:
-            logger.info(f"Processing scanned PDF with OCR: {pdf_path}")
+            logger.info(f"Processing scanned PDF with DocTR OCR: {pdf_path}")
             pixmaps = pdf_to_images(pdf_path)
             with ThreadPoolExecutor(max_workers=THREADS) as executor:
-                texts = list(executor.map(process_page, pixmaps))
+                texts = list(executor.map(process_page_with_doctr, pixmaps))
             return texts
     except Exception as e:
         logger.error("Failed to extract text from %s: %s", pdf_path, e)
         return []
+
 
 def extract_pdf_text_from_s3(s3_key, THREADS=16):
     with tempfile.NamedTemporaryFile(suffix='.pdf', delete=True) as tmp_pdf:
