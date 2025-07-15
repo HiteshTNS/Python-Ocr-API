@@ -1,20 +1,18 @@
 import time
-
 from fastapi import APIRouter, HTTPException
 import tempfile
 import os
 import logging
 
 from app.models.config import AppSettings
-from app.services.extractor import extract_text_from_pdf
-from app.services.search import search_keywords_in_pdf
 from app.utils.s3_utils import download_s3_file, delete_s3_file
 from app.models.OCRSearchRequest import OCRSearchRequest
+from app.services.search import search_keywords_live_parallel
 
 env_profile = os.environ.get("APP_PROFILE", "uat")
 env_file = f".env.{env_profile}"
 settings = AppSettings(_env_file=env_file)
-enviornment=settings.enviornment
+enviornment = settings.enviornment
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -40,21 +38,19 @@ def get_document_with_ocr_search(request: OCRSearchRequest):
         try:
             download_s3_file(pdf_s3_key, tmp_pdf_path, settings=settings)
         except Exception as e:
-            # logger.error(f"Failed to download PDF from S3: {e}")
             raise HTTPException(status_code=404, detail=f"PDF not found: {pdf_s3_key}")
-        # print("Running From :"+ enviornment)
         start_time = time.time()
-        all_page_text = extract_text_from_pdf(tmp_pdf_path)
-        search_response = search_keywords_in_pdf(
-            all_page_text, keywords, return_only_filtered
+        search_response = search_keywords_live_parallel(
+            pdf_path=tmp_pdf_path,
+            keywords=keywords,
+            return_only_filtered=return_only_filtered,
+            THREADS=16  # Or as needed
         )
         end_time = time.time()
         print(f"PDF processing and search took {end_time - start_time:.2f} seconds")
         return search_response
     finally:
-        # Remove the PDF from S3 and local temp file
         try:
-            # delete_s3_file(pdf_s3_key, settings=settings)
             print("File deleted log")
         except Exception:
             pass
