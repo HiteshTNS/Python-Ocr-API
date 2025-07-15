@@ -25,7 +25,6 @@ def get_document_with_ocr_search(request: OCRSearchRequest):
         file_id = file_id[:-4]
     keywords_str = request.keywords
     return_only_filtered = getattr(request, "returnOnlyFilteredPages", False)
-
     # Support both string and list for keywords
     if isinstance(keywords_str, str):
         keywords = [k.strip() for k in keywords_str.split("|") if k.strip()]
@@ -41,13 +40,11 @@ def get_document_with_ocr_search(request: OCRSearchRequest):
         try:
             download_s3_file(pdf_s3_key, tmp_pdf_path, settings=settings)
         except Exception as e:
-            logger.error(f"Failed to download PDF from S3: {e}")
+            # logger.error(f"Failed to download PDF from S3: {e}")
             raise HTTPException(status_code=404, detail=f"PDF not found: {pdf_s3_key}")
-        print("Running From :"+ enviornment)
+        # print("Running From :"+ enviornment)
         start_time = time.time()
         all_page_text = extract_text_from_pdf(tmp_pdf_path)
-        print("============================Extracted Text =========================")
-        print(all_page_text)
         search_response = search_keywords_in_pdf(
             all_page_text, keywords, return_only_filtered
         )

@@ -1,17 +1,31 @@
 import logging
-from typing import List, Dict
+import re
+from typing import List, Dict, Union
 
 logger = logging.getLogger(__name__)
 
 def search_keywords_in_pdf(
-    all_page_text: list, keywords: list, return_only_filtered: bool = False
-) -> dict:
+    all_page_text: List[str], keywords: List[str], return_only_filtered: bool = False
+) -> Dict[str, Union[List[Dict], Dict]]:
     imageToTextSearchResponse = []
     any_keyword_found = False
 
+    # Compile regex patterns for each keyword to match exact word (word boundaries)
+    # Example: r'\bcontract\b' to match only the exact word
+    keyword_patterns = {
+        kw: re.compile(rf'\b{re.escape(kw)}\b', re.IGNORECASE) for kw in keywords
+    }
+
     for idx, page_text in enumerate(all_page_text):
-        matched_keywords = [kw for kw in keywords if kw.lower() in page_text.lower()]
+        matched_keywords = []
+
+        # Check each pattern using regex word-boundary matching
+        for kw, pattern in keyword_patterns.items():
+            if pattern.search(page_text):
+                matched_keywords.append(kw)
+
         cleaned_text = page_text.replace('\n', ' ')
+
         if matched_keywords:
             any_keyword_found = True
             imageToTextSearchResponse.append({
@@ -20,16 +34,16 @@ def search_keywords_in_pdf(
                 "selectedKeywords": "|".join(matched_keywords),
                 "pageContent": cleaned_text
             })
-        # elif not return_only_filtered:
-        #     # Only include non-matching pages if returnOnlyFilteredPages is False
-        #     imageToTextSearchResponse.append({
-        #         "pageNO": idx + 1,
-        #         "keywordMatched": False,
-        #         "selectedKeywords": "",
-        #         "pageContent": cleaned_text
-        #     })
+        elif not return_only_filtered:
+            # Include non-matching pages only if return_only_filtered is False
+            imageToTextSearchResponse.append({
+                "pageNO": idx + 1,
+                "keywordMatched": False,
+                "selectedKeywords": "",
+                "pageContent": cleaned_text
+            })
 
-    # If no keywords found on any page, return special response
+    # If no keywords found at all, return special fallback response
     if not any_keyword_found:
         return {
             "imageToTextSearchResponse": {
@@ -39,13 +53,6 @@ def search_keywords_in_pdf(
             }
         }
 
-    # If returnOnlyFilteredPages is False, add full response
-    if not return_only_filtered:
-        return {
-            "imageToTextSearchResponse": imageToTextSearchResponse,
-            "imageToTextfullResponse": " ".join([t.replace('\n', ' ') for t in all_page_text])
-        }
-    else:
-        return {
-            "imageToTextSearchResponse": imageToTextSearchResponse
-        }
+    return {
+        "imageToTextSearchResponse": imageToTextSearchResponse
+    }

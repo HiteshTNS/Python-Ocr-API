@@ -1,5 +1,7 @@
 import os
 import logging
+import time
+
 import pytesseract
 import fitz  # PyMuPDF
 import cv2
@@ -23,7 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DPI = 200  # Lowered for speed, increase if needed
+DPI = 150  # Lowered for speed, increase if needed
 TESSERACT_CONFIG = '--oem 1 --psm 6 -c preserve_interword_spaces=1'
 MIN_TEXT_LENGTH = 50
 
@@ -50,10 +52,19 @@ def fast_preprocess(img_array):
     gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
     return cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
 
-def pdf_to_images(pdf_path, dpi=DPI):
+def pdf_to_images(pdf_path, dpi=DPI, max_workers=8):
     try:
         doc = fitz.open(pdf_path)
-        return [doc.load_page(i).get_pixmap(dpi=dpi) for i in range(len(doc))]
+        num_pages = len(doc)
+
+        def render_page(page_num):
+            page = doc.load_page(page_num)
+            return page.get_pixmap(dpi=dpi)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            pixmaps = list(executor.map(render_page, range(num_pages)))
+        return pixmaps
+
     except Exception as e:
         logger.error("Rendering failed for %s: %s", pdf_path, e)
         return []
@@ -75,7 +86,7 @@ def extract_text_from_pdf(pdf_path, THREADS=16):
     """
     try:
         if is_digital_pdf(pdf_path):
-            logger.info(f"Processing digital PDF with pdfplumber: {pdf_path}")
+            # logger.info(f"Processing digital PDF with pdfplumber: {pdf_path}")
             try:
                 with pdfplumber.open(pdf_path) as pdf:
                     return [clean_ocr_text(page.extract_text() or "") for page in pdf.pages]
@@ -84,14 +95,19 @@ def extract_text_from_pdf(pdf_path, THREADS=16):
                 with fitz.open(pdf_path) as doc:
                     return [clean_ocr_text(page.get_text()) for page in doc]
         else:
-            logger.info(f"Processing scanned PDF with OCR: {pdf_path}")
-
+            # logger.info(f"Processing scanned PDF with OCR: {pdf_path}")
+            # Time pixmap generation
+            pixmap_start = time.time()
             pixmaps = pdf_to_images(pdf_path)
-
+            pixmap_end = time.time()
+            logger.info(f"Pixmap generation took {pixmap_end - pixmap_start:.2f} seconds")
+            # Time OCR (texts extraction)
+            ocr_start = time.time()
             with ThreadPoolExecutor(max_workers=THREADS) as executor:
-
                 texts = list(executor.map(process_page, pixmaps))
-                
+            ocr_end = time.time()
+            logger.info(f"OCR extraction took {ocr_end - ocr_start:.2f} seconds")
+
             return texts
     except Exception as e:
         logger.error("Failed to extract text from %s: %s", pdf_path, e)
