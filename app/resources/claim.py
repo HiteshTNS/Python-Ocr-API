@@ -6,7 +6,7 @@ import tempfile
 import os
 import logging
 from app.models.config import AppSettings
-from app.utils.s3_utils import download_s3_file
+from app.utils.s3_utils import download_s3_file, delete_s3_file
 from app.models.OCRSearchRequest import OCRSearchRequest
 from app.services.search import search_keywords_live_parallel
 
@@ -67,9 +67,12 @@ def get_document_with_ocr_search(request: OCRSearchRequest):
         logger.error(f"Internal error during OCR search: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
+        # Remove the PDF from S3 and local temp file
+        try:
+            delete_s3_file(pdf_s3_key, settings=settings)
+        except Exception:
+            pass
         try:
             os.remove(tmp_pdf_path)
-            logger.info("Temporary file deleted.")
         except Exception as cleanup_err:
             logger.warning(f"Failed to delete temp file: {cleanup_err}")
-
