@@ -1,11 +1,12 @@
+
 import time
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import JSONResponse
 import tempfile
 import os
 import logging
-
 from app.models.config import AppSettings
-from app.utils.s3_utils import download_s3_file, delete_s3_file
+from app.utils.s3_utils import download_s3_file
 from app.models.OCRSearchRequest import OCRSearchRequest
 from app.services.search import search_keywords_live_parallel
 
@@ -16,24 +17,34 @@ enviornment = settings.enviornment
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-@router.post("/getDocumentwithOCRSearchPyMuPdf")
+@router.post("/getDocumentwithOCRSearchPyMuPdf", status_code=200)
 def get_document_with_ocr_search(request: OCRSearchRequest):
     file_id = request.file_Id
     if file_id.lower().endswith('.pdf'):
         file_id = file_id[:-4]
     keywords_str = request.keywords
     return_only_filtered = getattr(request, "returnOnlyFilteredPages", False)
-    # Support both string and list for keywords
+
+    # Check if keywords are missing
+    if not keywords_str:
+        raise HTTPException(status_code=400, detail="Keywords cannot be empty.")
+
+    # Simulate 401 (unauthorized)
+    if file_id.lower() == "unauthorized":
+        raise HTTPException(status_code=401, detail="Unauthorized access")
+
+    # Simulate 403 (forbidden)
+    if file_id.lower() == "forbidden":
+        raise HTTPException(status_code=403, detail="Access to this file is forbidden")
+
+    # Normalize keywords
     if isinstance(keywords_str, str):
         keywords = [k.strip() for k in keywords_str.split("|") if k.strip()]
     else:
         keywords = keywords_str
-
     pdf_s3_key = f"{file_id}.pdf"
-
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
         tmp_pdf_path = tmp_pdf.name
-
     try:
         try:
             download_s3_file(pdf_s3_key, tmp_pdf_path, settings=settings)
@@ -44,17 +55,21 @@ def get_document_with_ocr_search(request: OCRSearchRequest):
             pdf_path=tmp_pdf_path,
             keywords=keywords,
             return_only_filtered=return_only_filtered,
-            THREADS=16  # Or as needed
+            THREADS=16
         )
+
         end_time = time.time()
-        print(f"PDF processing and search took {end_time - start_time:.2f} seconds")
-        return search_response
+        logger.info(f"PDF processing and search took {end_time - start_time:.2f} seconds")
+        return JSONResponse(status_code=status.HTTP_200_OK, content=search_response)
+    except HTTPException:
+        raise  # Re-raise if already handled
+    except Exception as e:
+        logger.error(f"Internal error during OCR search: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         try:
-            print("File deleted log")
-        except Exception:
-            pass
-        try:
             os.remove(tmp_pdf_path)
-        except Exception:
-            pass
+            logger.info("Temporary file deleted.")
+        except Exception as cleanup_err:
+            logger.warning(f"Failed to delete temp file: {cleanup_err}")
+
