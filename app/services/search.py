@@ -1,63 +1,71 @@
 import io
 import logging
 import re
+import os
 from typing import List, Dict, Union
 from concurrent.futures import ThreadPoolExecutor
 
-import cv2
-import fitz
 import numpy as np
+import cv2
+import fitz  # PyMuPDF
 import pytesseract
-from pdf2image import convert_from_bytes
 
-from app.services.extractor import (
-    clean_ocr_text,
-    fast_preprocess,
-    page_pixmap_to_image,
-    DPI,
-    TESSERACT_CONFIG,
-    MIN_TEXT_LENGTH,
-)
+# --- Your Extractor utils. Make sure these exist or adapt as needed ---
+# Example stubs below:
+DPI = 150
+TESSERACT_CONFIG = '--oem 1 --psm 6 -c preserve_interword_spaces=1'
+MIN_TEXT_LENGTH = 50
+
+def clean_ocr_text(text: str) -> str:
+    # Remove suspicious whitespace and normalize newlines.
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n+', '\n', text)
+    text = re.sub(r'^[ \t]+|[ \t]+$', '', text, flags=re.MULTILINE)
+    return text.strip()
+
+def fast_preprocess(img_array):
+    gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+    return cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+
+def page_pixmap_to_image(pix):
+    """
+    Converts a PyMuPDF pixmap to numpy OpenCV image.
+    """
+    arr = np.frombuffer(pix.samples, dtype=np.uint8)
+    if pix.n >= 4:
+        # RGBA
+        img = arr.reshape((pix.h, pix.w, pix.n))
+        img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
+    else:
+        img = arr.reshape((pix.h, pix.w, pix.n))
+    return img
+# ---------------------------------------------------------------------
 
 logger = logging.getLogger(__name__)
 
-def process_page_and_search(page_num: int, pdf_bytes: bytes, keywords: List[str],
-                           return_only_filtered: bool, dpi: int = DPI) -> Union[Dict, None]:
+def process_page_and_search(
+    page_num: int, pdf_bytes: bytes, keywords: List[str],
+    return_only_filtered: bool, dpi: int = DPI
+) -> Union[Dict, None]:
     """
-    Process a single page: extract text using PyMuPDF (for digital PDFs), or OCR if needed.
-    Returns a result dict or None for this page.
+    Extracts digital text if present, else runs OCR on the page image.
+    Returns a search result dict or None if not required.
     """
     try:
-        # Each thread must open its own fitz.Document for thread safety
         with fitz.open("pdf", pdf_bytes) as doc:
             page = doc.load_page(page_num)
             text = page.get_text()
+            # If text is insufficient, run OCR on rendered image
             if len(text.strip()) < MIN_TEXT_LENGTH:
-                # OCR fallback for scanned/image page
                 pix = page.get_pixmap(dpi=dpi)
                 img = page_pixmap_to_image(pix)
                 img = fast_preprocess(img)
                 text = pytesseract.image_to_string(img, config=TESSERACT_CONFIG)
-                # 1. Render the specific page as an image
-                # images = convert_from_bytes(
-                #     pdf_bytes, dpi=dpi, first_page=page_num + 1, last_page=page_num + 1
-                # )
-                # image = images[0]
-                #
-                # # 2. Convert PIL image to OpenCV format
-                # img_byte_arr = io.BytesIO()
-                # image.save(img_byte_arr, format='PNG')
-                # img_array = np.frombuffer(img_byte_arr.getvalue(), np.uint8)
-                # img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-                #
-                # # 3. Do OCR
-                # text = pytesseract.image_to_string(img, config=TESSERACT_CONFIG)
             cleaned = clean_ocr_text(text)
             matched_keywords = [
                 kw for kw in keywords
                 if re.search(rf'\b{re.escape(kw)}\b', cleaned, flags=re.IGNORECASE)
             ]
-
             if matched_keywords or not return_only_filtered:
                 return {
                     "pageNO": page_num + 1,
@@ -76,20 +84,19 @@ def search_keywords_live_parallel(
     THREADS: int = 8
 ) -> Dict[str, Union[List[Dict], Dict]]:
     """
-    Extract and search PDF pages in parallel using threads.
-    Returns structured search response.
+    Process all PDF pages in parallel. Tries digital extraction first, then OCR.
     """
     results = []
     try:
-        # Read PDF file into memory ONCE for efficiency/thread safety.
+        # Read the whole PDF into memory for thread safety and speed
         with open(pdf_path, "rb") as f:
             pdf_bytes = f.read()
 
-        # Open DOCUMENT ONCE (not for thread sharing), just to get number of pages.
+        # Determine the number of pages
         with fitz.open("pdf", pdf_bytes) as doc:
             num_pages = len(doc)
 
-        # Recommended: use ThreadPoolExecutor WITH context manager [2][4]
+        # Parallel processing of all pages
         with ThreadPoolExecutor(max_workers=THREADS) as executor:
             futures = [
                 executor.submit(
@@ -97,13 +104,11 @@ def search_keywords_live_parallel(
                     i, pdf_bytes, keywords, return_only_filtered
                 ) for i in range(num_pages)
             ]
-
             for future in futures:
                 result = future.result()
                 if result:
                     results.append(result)
 
-        # Handle not found and error cases for consistency
         if not results and return_only_filtered:
             return {
                 "imageToTextSearchResponse": {
@@ -112,7 +117,6 @@ def search_keywords_live_parallel(
                     "pageContent": "null"
                 }
             }
-
         return {"imageToTextSearchResponse": results}
 
     except Exception as e:
