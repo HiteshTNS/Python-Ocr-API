@@ -24,7 +24,8 @@ def get_document_with_ocr_search(request: OCRSearchRequest):
         file_id = file_id[:-4]
     keywords_str = request.keywords
     return_only_filtered = getattr(request, "returnOnlyFilteredPages", False)
-
+    CPU_THREADS = os.cpu_count() or 4
+    # print("Maximum Threads using : " , CPU_THREADS)
     # Check if keywords are missing
     if not keywords_str:
         raise HTTPException(status_code=400, detail="Keywords cannot be empty.")
@@ -55,7 +56,7 @@ def get_document_with_ocr_search(request: OCRSearchRequest):
             pdf_path=tmp_pdf_path,
             keywords=keywords,
             return_only_filtered=return_only_filtered,
-            THREADS=16
+            THREADS=CPU_THREADS
         )
 
         end_time = time.time()
