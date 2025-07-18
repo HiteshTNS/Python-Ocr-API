@@ -1,3 +1,4 @@
+import base64
 import os
 import time
 import logging
@@ -6,8 +7,8 @@ from fastapi.responses import JSONResponse
 from app.models.config import AppSettings
 from app.models.OCRSearchRequest import OCRSearchRequest
 from app.services.search import search_keywords_live_parallel
-from app.resources.sgresource import fetch_pdf_base64, save_base64_to_pdf  # Import your resource functions
-import tempfile
+from app.resources.sgresource import fetch_pdf_base64  # Import your resource functions
+
 
 env_profile = os.environ.get("APP_PROFILE", "uat")
 env_file = f".env.{env_profile}"
@@ -42,7 +43,8 @@ def get_document_with_ocr_search(request: OCRSearchRequest):
     # Fetch base64 PDF from internal API and save to temp file
     try:
         pdf_base64 = fetch_pdf_base64(file_id)
-        tmp_pdf_path = save_base64_to_pdf(pdf_base64)
+        # pdf_base64 = test_pdf_code(file_id)
+        # tmp_pdf_path = save_base64_to_pdf(pdf_base64)
     except Exception as e:
         logger.error(f"Failed to fetch or decode PDF for file_id {file_id}: {e}")
         raise HTTPException(status_code=404, detail=f"Unable to fetch PDF for file_id {file_id}")
@@ -50,7 +52,7 @@ def get_document_with_ocr_search(request: OCRSearchRequest):
     try:
         start_time = time.time()
         search_response = search_keywords_live_parallel(
-            pdf_path=tmp_pdf_path,
+            pdf_bytes=pdf_base64,
             keywords=keywords,
             return_only_filtered=return_only_filtered,
             THREADS=CPU_THREADS
@@ -63,9 +65,32 @@ def get_document_with_ocr_search(request: OCRSearchRequest):
     except Exception as e:
         logger.error(f"Internal error during OCR search: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
-    finally:
-        # Always cleanup temp pdf file
-        try:
-            os.remove(tmp_pdf_path)
-        except Exception as cleanup_err:
-            logger.warning(f"Failed to delete temp file: {cleanup_err}")
+    # finally:
+    #     # Always cleanup temp pdf file
+    #     try:
+    #         os.remove(tmp_pdf_path)
+    #     except Exception as cleanup_err:
+    #         logger.warning(f"Failed to delete temp file: {cleanup_err}")
+
+# @router.post("/getDocuments")
+# def get_base64_pdf():
+#     """
+#     Returns a base64-encoded string of a hardcoded PDF file
+#     """
+#     # 🔁 Replace this with your actual file path as needed
+#     pdf_file_path = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\PIUNTI 108721.pdf"  # e.g., "files/sample.pdf"
+#
+#     if not os.path.exists(pdf_file_path):
+#         raise HTTPException(status_code=404, detail="PDF file not found.")
+#
+#     try:
+#         with open(pdf_file_path, "rb") as pdf_file:
+#             pdf_bytes = pdf_file.read()
+#             base64_str = base64.b64encode(pdf_bytes).decode("utf-8")
+#
+#         return JSONResponse(
+#             content={"status": "success", "base64PDF": base64_str}
+#         )
+#
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Failed to encode PDF: {str(e)}")

@@ -78,37 +78,46 @@ def process_page_and_search(
     return None
 
 def search_keywords_live_parallel(
-    pdf_path: str,
+    pdf_bytes: bytes,
     keywords: List[str],
     return_only_filtered: bool = False,
     THREADS: int = 8
 ) -> Dict[str, Union[List[Dict], Dict]]:
     """
-    Process all PDF pages in parallel. Tries digital extraction first, then OCR.
+    Process all PDF pages in memory in parallel using PyMuPDF and OCR.
+    :param pdf_bytes: PDF in bytes (decoded from base64)
+    :param keywords: List of keywords to search
+    :param return_only_filtered: Return only pages with matched keywords
+    :param THREADS: Number of threads to use
+    :return: OCR results with matched pages
     """
-    results = []
-    try:
-        # Read the whole PDF into memory for thread safety and speed
-        with open(pdf_path, "rb") as f:
-            pdf_bytes = f.read()
 
-        # Determine the number of pages
+    results = []
+
+    try:
+        # Load the in-memory PDF and get page count
         with fitz.open("pdf", pdf_bytes) as doc:
             num_pages = len(doc)
 
-        # Parallel processing of all pages
+        # Parallel processing of each page
         with ThreadPoolExecutor(max_workers=THREADS) as executor:
             futures = [
                 executor.submit(
                     process_page_and_search,
-                    i, pdf_bytes, keywords, return_only_filtered
-                ) for i in range(num_pages)
+                    i,
+                    pdf_bytes,
+                    keywords,
+                    return_only_filtered
+                )
+                for i in range(num_pages)
             ]
+
             for future in futures:
                 result = future.result()
                 if result:
                     results.append(result)
 
+        # If no results and we only want matched pages
         if not results and return_only_filtered:
             return {
                 "imageToTextSearchResponse": {
@@ -117,10 +126,11 @@ def search_keywords_live_parallel(
                     "pageContent": "null"
                 }
             }
+
         return {"imageToTextSearchResponse": results}
 
     except Exception as e:
-        logger.error(f"Error in parallel keyword processor: {e}")
+        logger.error(f"Error in base64 OCR processor: {e}")
         return {
             "imageToTextSearchResponse": {
                 "keywordMatched": False,
@@ -128,3 +138,4 @@ def search_keywords_live_parallel(
                 "pageContent": str(e)
             }
         }
+
