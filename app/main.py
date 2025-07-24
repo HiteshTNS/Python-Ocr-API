@@ -17,6 +17,10 @@ app = FastAPI(
     description="Extracts and searches claim documents from PDFs.",
     version="1.0.0"
 )
+logging.basicConfig(
+    level=logging.INFO,  # or DEBUG
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 app.add_middleware(CorrelationIdMiddleware)
 app.include_router(claim.router)
 @app.exception_handler(NoMatchFoundException)

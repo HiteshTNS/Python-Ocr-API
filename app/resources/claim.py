@@ -56,6 +56,8 @@ def get_document_with_ocr_search(request: OCRSearchRequest):
             keywords=keywords,
             return_only_filtered=return_only_filtered,
             THREADS=CPU_THREADS
+                        # THREADS=8
+
         )
         end_time = time.time()
         logger.info(f"PDF processing and search took {end_time - start_time:.2f} seconds")

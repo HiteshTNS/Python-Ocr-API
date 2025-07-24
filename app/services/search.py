@@ -1,141 +1,122 @@
-import io
 import logging
 import re
 import os
+
+from app.services.extractor import clean_ocr_text, fast_preprocess, page_pixmap_to_image
+os.environ['OMP_THREAD_LIMIT'] = '1'
 from typing import List, Dict, Union
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import cv2
 import fitz  # PyMuPDF
 import pytesseract
 
-# --- Your Extractor utils. Make sure these exist or adapt as needed ---
-# Example stubs below:
+# --- Configuration ---
 DPI = 150
 TESSERACT_CONFIG = '--oem 1 --psm 6 -c preserve_interword_spaces=1'
 MIN_TEXT_LENGTH = 50
+THREADS = os.cpu_count() or 4  # Adjustable
 
-def clean_ocr_text(text: str) -> str:
-    # Remove suspicious whitespace and normalize newlines.
-    text = re.sub(r'[ \t]+', ' ', text)
-    text = re.sub(r'\n+', '\n', text)
-    text = re.sub(r'^[ \t]+|[ \t]+$', '', text, flags=re.MULTILINE)
-    return text.strip()
+# Tesseract path for Windows users
+pytesseract.pytesseract.tesseract_cmd = r'C:\Users\st\AppData\Local\Programs\Tesseract-OCR\tesseract.exe'
 
-def fast_preprocess(img_array):
-    gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-    return cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
-
-def page_pixmap_to_image(pix):
-    """
-    Converts a PyMuPDF pixmap to numpy OpenCV image.
-    """
-    arr = np.frombuffer(pix.samples, dtype=np.uint8)
-    if pix.n >= 4:
-        # RGBA
-        img = arr.reshape((pix.h, pix.w, pix.n))
-        img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
-    else:
-        img = arr.reshape((pix.h, pix.w, pix.n))
-    return img
-# ---------------------------------------------------------------------
-
+# Logger
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
-def process_page_and_search(
-    page_num: int, pdf_bytes: bytes, keywords: List[str],
-    return_only_filtered: bool, dpi: int = DPI
+
+# --- Page Processor for Threads ---
+def process_page_from_doc(
+    page_num: int,
+    page: fitz.Page,
+    keywords: List[str],
+    return_only_filtered: bool
 ) -> Union[Dict, None]:
-    """
-    Extracts digital text if present, else runs OCR on the page image.
-    Returns a search result dict or None if not required.
-    """
     try:
-        with fitz.open("pdf", pdf_bytes) as doc:
-            page = doc.load_page(page_num)
-            text = page.get_text()
-            # If text is insufficient, run OCR on rendered image
-            if len(text.strip()) < MIN_TEXT_LENGTH:
-                pix = page.get_pixmap(dpi=dpi)
-                img = page_pixmap_to_image(pix)
-                img = fast_preprocess(img)
-                text = pytesseract.image_to_string(img, config=TESSERACT_CONFIG)
-            cleaned = clean_ocr_text(text)
-            matched_keywords = [
-                kw for kw in keywords
-                if re.search(rf'\b{re.escape(kw)}\b', cleaned, flags=re.IGNORECASE)
-            ]
-            if matched_keywords or not return_only_filtered:
-                return {
-                    "pageNO": page_num + 1,
-                    "keywordMatched": bool(matched_keywords),
-                    "selectedKeywords": "|".join(matched_keywords),
-                    "pageContent": cleaned.replace("\n", " ")
-                }
+        text = page.get_text()
+
+        if len(text.strip()) < MIN_TEXT_LENGTH:
+            pix = page.get_pixmap(dpi=DPI)
+            img = page_pixmap_to_image(pix)
+            img = fast_preprocess(img)
+            text = pytesseract.image_to_string(img, config=TESSERACT_CONFIG)
+
+        cleaned = clean_ocr_text(text)
+
+        matched_keywords = [
+            kw for kw in keywords
+            if re.search(rf'\b{re.escape(kw)}\b', cleaned, flags=re.IGNORECASE)
+        ]
+
+        if matched_keywords or not return_only_filtered:
+            return {
+                "pageNO": page_num + 1,
+                "keywordMatched": bool(matched_keywords),
+                "selectedKeywords": "|".join(matched_keywords),
+                "pageContent": cleaned.replace("\n", " ")
+            }
+
     except Exception as e:
-        logger.error(f"Error processing/searching page {page_num}: {e}")
+        logger.error(f"[Page {page_num}] Error: {e}")
+
     return None
 
+# --- Main Controller ---
 def search_keywords_live_parallel(
     pdf_bytes: bytes,
     keywords: List[str],
     return_only_filtered: bool = False,
-    THREADS: int = 8
+    THREADS: int = THREADS
 ) -> Dict[str, Union[List[Dict], Dict]]:
-    """
-    Process all PDF pages in memory in parallel using PyMuPDF and OCR.
-    :param pdf_bytes: PDF in bytes (decoded from base64)
-    :param keywords: List of keywords to search
-    :param return_only_filtered: Return only pages with matched keywords
-    :param THREADS: Number of threads to use
-    :return: OCR results with matched pages
-    """
-
     results = []
+    doc = None
 
     try:
-        # Load the in-memory PDF and get page count
-        with fitz.open("pdf", pdf_bytes) as doc:
-            num_pages = len(doc)
+        doc = fitz.open("pdf", pdf_bytes)  # Do not use 'with' — we need to keep it open
+        pages = [doc.load_page(i) for i in range(len(doc))]
 
-        # Parallel processing of each page
+        logger.info(f"Loaded {len(pages)} pages; starting ThreadPoolExecutor with {THREADS} threads")
+
         with ThreadPoolExecutor(max_workers=THREADS) as executor:
             futures = [
                 executor.submit(
-                    process_page_and_search,
+                    process_page_from_doc,
                     i,
-                    pdf_bytes,
+                    pages[i],
                     keywords,
                     return_only_filtered
                 )
-                for i in range(num_pages)
+                for i in range(len(pages))
             ]
 
-            for future in futures:
+            for future in as_completed(futures):
                 result = future.result()
                 if result:
                     results.append(result)
 
-        # If no results and we only want matched pages
         if not results and return_only_filtered:
             return {
                 "imageToTextSearchResponse": {
+                    "message": "No keywords matched on any page.",
                     "keywordMatched": False,
-                    "selectedKeywords": "NOT FOUND",
-                    "pageContent": "null"
+                    "selectedKeywords": "",
+                    "pageContent": ""
                 }
             }
 
         return {"imageToTextSearchResponse": results}
 
     except Exception as e:
-        logger.error(f"Error in base64 OCR processor: {e}")
+        logger.exception(" OCR processing failed!")
         return {
             "imageToTextSearchResponse": {
+                "message": "Unexpected error during OCR processing.",
                 "keywordMatched": False,
                 "selectedKeywords": "ERROR",
                 "pageContent": str(e)
             }
         }
-
+    finally:
+        if doc is not None:
+            doc.close()  # 🔒 Ensure we close the document

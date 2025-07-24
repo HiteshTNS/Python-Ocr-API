@@ -10,4 +10,4 @@ class AppSettings(BaseSettings):
     pdf_json_output_prefix: str
     batch_size: int
     enviornment:str
-settings = AppSettings()
+settings = AppSettings(_env_file=".env.uat")

@@ -19,5 +19,14 @@ def fast_preprocess(img_array):
     gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
     return cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
 
+# def page_pixmap_to_image(pix):
+#     return np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
+
 def page_pixmap_to_image(pix):
-    return np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
+    arr = np.frombuffer(pix.samples, dtype=np.uint8)
+    if pix.n >= 4:
+        img = arr.reshape((pix.h, pix.w, pix.n))
+        img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
+    else:
+        img = arr.reshape((pix.h, pix.w, pix.n))
+    return img
