@@ -1,9 +1,6 @@
 import logging
 import re
 import os
-
-from app.services.extractor import clean_ocr_text, fast_preprocess, page_pixmap_to_image
-os.environ['OMP_THREAD_LIMIT'] = '1'
 from typing import List, Dict, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -12,21 +9,34 @@ import cv2
 import fitz  # PyMuPDF
 import pytesseract
 
-# --- Configuration ---
 DPI = 150
-TESSERACT_CONFIG = '--oem 1 --psm 6 -c preserve_interword_spaces=1'
-MIN_TEXT_LENGTH = 50
-THREADS = os.cpu_count() or 4  # Adjustable
-
+TESSERACT_CONFIG = '--oem 1 --psm 6'
+MIN_TEXT_LENGTH = 40
+THREADS = os.cpu_count() or 4
 # Tesseract path for Windows users
 pytesseract.pytesseract.tesseract_cmd = r'C:\Users\st\AppData\Local\Programs\Tesseract-OCR\tesseract.exe'
-
-# Logger
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+
+def clean_ocr_text(text: str) -> str:
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n+', '\n', text)
+    text = re.sub(r'^[ \t]+|[ \t]+$', '', text, flags=re.MULTILINE)
+    return text.strip()
+
+def fast_preprocess(img_array):
+    gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+    return cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
 
 
-# --- Page Processor for Threads ---
+def page_pixmap_to_image(pix):
+    arr = np.frombuffer(pix.samples, dtype=np.uint8)
+    if pix.n >= 4:
+        img = arr.reshape((pix.h, pix.w, pix.n))
+        img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
+    else:
+        img = arr.reshape((pix.h, pix.w, pix.n))
+    return img
+
 def process_page_from_doc(
     page_num: int,
     page: fitz.Page,
@@ -35,20 +45,15 @@ def process_page_from_doc(
 ) -> Union[Dict, None]:
     try:
         text = page.get_text()
-
         if len(text.strip()) < MIN_TEXT_LENGTH:
             pix = page.get_pixmap(dpi=DPI)
             img = page_pixmap_to_image(pix)
             img = fast_preprocess(img)
             text = pytesseract.image_to_string(img, config=TESSERACT_CONFIG)
-
         cleaned = clean_ocr_text(text)
-
         matched_keywords = [
-            kw for kw in keywords
-            if re.search(rf'\b{re.escape(kw)}\b', cleaned, flags=re.IGNORECASE)
+            kw for kw in keywords if re.search(rf'\b{re.escape(kw)}\b', cleaned, flags=re.IGNORECASE)
         ]
-
         if matched_keywords or not return_only_filtered:
             return {
                 "pageNO": page_num + 1,
@@ -56,13 +61,10 @@ def process_page_from_doc(
                 "selectedKeywords": "|".join(matched_keywords),
                 "pageContent": cleaned.replace("\n", " ")
             }
-
     except Exception as e:
         logger.error(f"[Page {page_num}] Error: {e}")
-
     return None
 
-# --- Main Controller ---
 def search_keywords_live_parallel(
     pdf_bytes: bytes,
     keywords: List[str],
@@ -71,12 +73,10 @@ def search_keywords_live_parallel(
 ) -> Dict[str, Union[List[Dict], Dict]]:
     results = []
     doc = None
-
     try:
-        doc = fitz.open("pdf", pdf_bytes)  # Do not use 'with' — we need to keep it open
+        doc = fitz.open("pdf", pdf_bytes)
         pages = [doc.load_page(i) for i in range(len(doc))]
-
-        logger.info(f"Loaded {len(pages)} pages; starting ThreadPoolExecutor with {THREADS} threads")
+        logger.info(f"Loaded {len(pages)} pages; ThreadPoolExecutor with {THREADS} threads")
 
         with ThreadPoolExecutor(max_workers=THREADS) as executor:
             futures = [
@@ -89,34 +89,31 @@ def search_keywords_live_parallel(
                 )
                 for i in range(len(pages))
             ]
-
             for future in as_completed(futures):
                 result = future.result()
                 if result:
                     results.append(result)
-
         if not results and return_only_filtered:
             return {
-                "imageToTextSearchResponse": {
-                    "message": "No keywords matched on any page.",
+                "imageToTextSearchResponse": [{
+                    "pageNO": 0,
                     "keywordMatched": False,
-                    "selectedKeywords": "",
-                    "pageContent": ""
-                }
+                    "selectedKeywords": "NOT FOUND",
+                    "pageContent": "null"
+                }]
             }
-
+        results.sort(key=lambda x: x['pageNO'])
         return {"imageToTextSearchResponse": results}
-
     except Exception as e:
-        logger.exception(" OCR processing failed!")
+        logger.exception("OCR processing failed!")
         return {
-            "imageToTextSearchResponse": {
-                "message": "Unexpected error during OCR processing.",
+            "imageToTextSearchResponse": [{
+                "pageNO": 0,
                 "keywordMatched": False,
                 "selectedKeywords": "ERROR",
                 "pageContent": str(e)
-            }
+            }]
         }
     finally:
         if doc is not None:
-            doc.close()  # 🔒 Ensure we close the document
+            doc.close()
