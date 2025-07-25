@@ -1,24 +1,40 @@
 import base64
 import os
-import time
 import logging
-from fastapi import APIRouter, HTTPException, status
+import asyncio
+import time
+from functools import partial
+from fastapi import APIRouter, HTTPException, status, BackgroundTasks
 from fastapi.responses import JSONResponse
-from app.models.config import AppSettings
+import httpx
+# from app.models.config import AppSettings
 from app.models.OCRSearchRequest import OCRSearchRequest
-from app.services.search import search_keywords_live_parallel
-from app.resources.sgresource import fetch_pdf_base64  # Import your resource functions
+from app.services.search import search_keywords_live_parallel  # This is blocking CPU code, will run async-wrapped
+from app.resources.sgresource import fetch_pdf_base64, test_pdf_code
+from app.utils.http_utils import post_ocr_result_to_db_async
 
+# env_profile = os.environ.get("APP_PROFILE", "uat")
+# env_file = f".env.{env_profile}"
+# settings = AppSettings(_env_file=env_file)
+# environment = settings.enviornment
 
-env_profile = os.environ.get("APP_PROFILE", "uat")
-env_file = f".env.{env_profile}"
-settings = AppSettings(_env_file=env_file)
-environment = settings.enviornment
 router = APIRouter()
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+ocr_semaphore = asyncio.Semaphore(10)  # Allow up to 10 OCR jobs at once
+
+async def async_search_keywords_live_parallel(*args, **kwargs):
+    """
+    Wraps the blocking OCR search function in a thread pool for async compatibility.
+    """
+    loop = asyncio.get_running_loop()
+    # Run the blocking function in a separate thread
+    return await loop.run_in_executor(None, lambda: search_keywords_live_parallel(*args, **kwargs))
+
+
 @router.post("/getDocumentwithOCRSearchPyMuPdf", status_code=200)
-def get_document_with_ocr_search(request: OCRSearchRequest):
+async def get_document_with_ocr_search(request: OCRSearchRequest, background_tasks: BackgroundTasks):
     file_id = request.file_Id
     keywords_str = request.keywords
     return_only_filtered = getattr(request, "returnOnlyFilteredPages", False)
@@ -40,57 +56,70 @@ def get_document_with_ocr_search(request: OCRSearchRequest):
     else:
         keywords = keywords_str
 
-    # Fetch base64 PDF from internal API and save to temp file
+    # Fetch base64 PDF from internal API (blocking sync, so run in thread)
+    loop = asyncio.get_running_loop()
     try:
-        pdf_base64 = fetch_pdf_base64(file_id)
-        # pdf_base64 = test_pdf_code(file_id)
-        # tmp_pdf_path = save_base64_to_pdf(pdf_base64)
+        # pdf_base64 = await loop.run_in_executor(None, lambda: fetch_pdf_base64(file_id))
+        pdf_base64 = await loop.run_in_executor(None, lambda: test_pdf_code(file_id))
+
     except Exception as e:
         logger.error(f"Failed to fetch or decode PDF for file_id {file_id}: {e}")
         raise HTTPException(status_code=404, detail=f"Unable to fetch PDF for file_id {file_id}")
 
-    try:
+        # OCR with concurrency limit
+    async with ocr_semaphore:
         start_time = time.time()
-        search_response = search_keywords_live_parallel(
+
+        # Prepare the callable with pre-filled args
+        ocr_task = partial(
+            search_keywords_live_parallel,
             pdf_bytes=pdf_base64,
             keywords=keywords,
-            return_only_filtered=return_only_filtered,
-            THREADS=CPU_THREADS
+            return_only_filtered=return_only_filtered
         )
+
+        # Then run it in executor
+        search_response = await loop.run_in_executor(None, ocr_task)
+
         end_time = time.time()
         logger.info(f"PDF processing and search took {end_time - start_time:.2f} seconds")
-        return JSONResponse(status_code=status.HTTP_200_OK, content=search_response)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Internal error during OCR search: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    # finally:
-    #     # Always cleanup temp pdf file
-    #     try:
-    #         os.remove(tmp_pdf_path)
-    #     except Exception as cleanup_err:
-    #         logger.warning(f"Failed to delete temp file: {cleanup_err}")
 
-# @router.post("/getDocuments")
-# def get_base64_pdf():
-#     """
-#     Returns a base64-encoded string of a hardcoded PDF file
-#     """
-#     # 🔁 Replace this with your actual file path as needed
-#     pdf_file_path = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\PIUNTI 108721.pdf"  # e.g., "files/sample.pdf"
-#
-#     if not os.path.exists(pdf_file_path):
-#         raise HTTPException(status_code=404, detail="PDF file not found.")
-#
-#     try:
-#         with open(pdf_file_path, "rb") as pdf_file:
-#             pdf_bytes = pdf_file.read()
-#             base64_str = base64.b64encode(pdf_bytes).decode("utf-8")
-#
-#         return JSONResponse(
-#             content={"status": "success", "base64PDF": base64_str}
-#         )
-#
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"Failed to encode PDF: {str(e)}")
+    # Offload POST callback to background task
+    background_tasks.add_task(post_ocr_result_to_db_async, file_id, keywords, search_response, max_retries=3, retry_delay=2.0, error_callback=log_post_error)
+
+    # Immediately return the OCR result so the client doesn't wait for downstream post
+    return JSONResponse(status_code=status.HTTP_200_OK, content=search_response)
+
+
+async def log_post_error(exc: Exception, **kwargs):
+    file_id = kwargs.get("file_id")
+    logger.error(f"Final failure posting OCR result for file_id {file_id}: {exc}")
+
+@router.post("/getDocuments")
+def get_base64_pdf():
+    """
+    Returns a base64-encoded string of a hardcoded PDF file
+    """
+    # 🔁 Replace this with your actual file path as needed
+    pdf_file_path = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\PIUNTI 108721.pdf"  # e.g., "files/sample.pdf"
+
+    if not os.path.exists(pdf_file_path):
+        raise HTTPException(status_code=404, detail="PDF file not found.")
+
+    try:
+        with open(pdf_file_path, "rb") as pdf_file:
+            pdf_bytes = pdf_file.read()
+            base64_str = base64.b64encode(pdf_bytes).decode("utf-8")
+
+        return JSONResponse(
+            content={"status": "success", "base64PDF": base64_str}
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to encode PDF: {str(e)}")
+
+@router.post("/receive-ocr-result")
+def receive_ocr_result(payload: dict):
+    print("Received OCR result:")
+    print(payload)
+    return {"status": "received", "message": "Data stored successfully"}

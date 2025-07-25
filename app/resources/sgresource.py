@@ -24,33 +24,27 @@ def fetch_pdf_base64(file_id):
     pdf_bytes = base64.b64decode(pdf_base64)
     return pdf_bytes
 
-# def save_base64_to_pdf(pdf_base64):
-#     pdf_bytes = base64.b64decode(pdf_base64)
-#     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
-#         tmp_pdf.write(pdf_bytes)
-#         return pdf_bytes  # Returns the temp file path
 
+def test_pdf_code(file_id=None):  # file_id is optional since /getDocuments is hardcoded
+    url = "http://127.0.0.1:8000/getDocuments"
 
-# def test_pdf_code(file_id=None):  # file_id is optional since /getDocuments is hardcoded
-#     url = "http://127.0.0.1:8000/getDocuments"
-#
-#     try:
-#         response = requests.post(url)
-#         response.raise_for_status()  # handle HTTP errors
-#
-#         data = response.json()
-#         if data.get("status") != "success":
-#             raise ValueError("API returned failure status.")
-#
-#         base64_pdf = data.get("base64PDF")
-#         if not base64_pdf:
-#             raise ValueError("No base64PDF found in response.")
-#
-#         pdf_bytes = base64.b64decode(base64_pdf)
-#         print("PDF loaded into memory (bytes), size:", len(pdf_bytes))
-#
-#         return pdf_bytes
-#
-#     except Exception as e:
-#         print("Error during PDF base64 test:", e)
-#         return None
+    try:
+        response = requests.post(url)
+        response.raise_for_status()  # handle HTTP errors
+
+        data = response.json()
+        if data.get("status") != "success":
+            raise ValueError("API returned failure status.")
+
+        base64_pdf = data.get("base64PDF")
+        if not base64_pdf:
+            raise ValueError("No base64PDF found in response.")
+
+        pdf_bytes = base64.b64decode(base64_pdf)
+        print("PDF loaded into memory (bytes), size:", len(pdf_bytes))
+
+        return pdf_bytes
+
+    except Exception as e:
+        print("Error during PDF base64 test:", e)
+        return None

@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 
 DPI = 150
-TESSERACT_CONFIG = '--oem 1 --psm 6 -c preserve_interword_spaces=1'
+# TESSERACT_CONFIG = '--oem 1 --psm 6 -c preserve_interword_spaces=1'
 MIN_TEXT_LENGTH = 50
 
 logger = logging.getLogger(__name__)
