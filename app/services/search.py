@@ -9,11 +9,11 @@ import cv2
 import fitz  # PyMuPDF
 import pytesseract
 
+# --- Configuration ---
 DPI = 150
 TESSERACT_CONFIG = '--oem 1 --psm 6'
 MIN_TEXT_LENGTH = 40
 THREADS = os.cpu_count() or 4
-# Tesseract path for Windows users
 pytesseract.pytesseract.tesseract_cmd = r'C:\Users\st\AppData\Local\Programs\Tesseract-OCR\tesseract.exe'
 logger = logging.getLogger(__name__)
 
@@ -27,14 +27,11 @@ def fast_preprocess(img_array):
     gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
     return cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
 
-
 def page_pixmap_to_image(pix):
     arr = np.frombuffer(pix.samples, dtype=np.uint8)
+    img = arr.reshape((pix.h, pix.w, pix.n))
     if pix.n >= 4:
-        img = arr.reshape((pix.h, pix.w, pix.n))
         img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
-    else:
-        img = arr.reshape((pix.h, pix.w, pix.n))
     return img
 
 def process_page_from_doc(
@@ -69,16 +66,33 @@ def search_keywords_live_parallel(
     pdf_bytes: bytes,
     keywords: List[str],
     return_only_filtered: bool = False,
-    THREADS: int = THREADS
+    executor: ThreadPoolExecutor = None
 ) -> Dict[str, Union[List[Dict], Dict]]:
     results = []
     doc = None
     try:
         doc = fitz.open("pdf", pdf_bytes)
         pages = [doc.load_page(i) for i in range(len(doc))]
-        logger.info(f"Loaded {len(pages)} pages; ThreadPoolExecutor with {THREADS} threads")
+        logger.info(f"Loaded {len(pages)} pages; using ThreadPoolExecutor")
 
-        with ThreadPoolExecutor(max_workers=THREADS) as executor:
+        if executor is None:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=THREADS) as local_executor:
+                futures = [
+                    local_executor.submit(
+                        process_page_from_doc,
+                        i,
+                        pages[i],
+                        keywords,
+                        return_only_filtered
+                    )
+                    for i in range(len(pages))
+                ]
+                for future in as_completed(futures):
+                    result = future.result()
+                    if result:
+                        results.append(result)
+        else:
             futures = [
                 executor.submit(
                     process_page_from_doc,
@@ -93,6 +107,7 @@ def search_keywords_live_parallel(
                 result = future.result()
                 if result:
                     results.append(result)
+
         if not results and return_only_filtered:
             return {
                 "imageToTextSearchResponse": [{
@@ -102,8 +117,11 @@ def search_keywords_live_parallel(
                     "pageContent": "null"
                 }]
             }
+
+        # Sort results by page number for ordered output
         results.sort(key=lambda x: x['pageNO'])
         return {"imageToTextSearchResponse": results}
+
     except Exception as e:
         logger.exception("OCR processing failed!")
         return {
