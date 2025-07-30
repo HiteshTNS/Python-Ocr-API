@@ -13,11 +13,6 @@ from app.services.search import search_keywords_live_parallel  # This is blockin
 from app.resources.sgresource import fetch_pdf_base64, test_pdf_code
 from app.utils.http_utils import post_ocr_result_to_db_async
 
-# env_profile = os.environ.get("APP_PROFILE", "uat")
-# env_file = f".env.{env_profile}"
-# settings = AppSettings(_env_file=env_file)
-# environment = settings.enviornment
-
 router = APIRouter()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -100,7 +95,7 @@ def get_base64_pdf():
     """
     Returns a base64-encoded string of a hardcoded PDF file
     """
-    # 🔁 Replace this with your actual file path as needed
+    # Replace this with your actual file path as needed
     pdf_file_path = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\PIUNTI 108721.pdf"  # e.g., "files/sample.pdf"
 
     if not os.path.exists(pdf_file_path):
