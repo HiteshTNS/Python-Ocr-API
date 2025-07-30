@@ -46,9 +46,9 @@ async def post_ocr_result_to_db_async(
                 logger.info(f"Successfully posted OCR result to downstream API on attempt {attempt}")
 
                 # --- EMAIL SENDING LOGIC AFTER SUCCESSFUL POST ---
-                html_body = build_html_body(payload)
-                loop = asyncio.get_running_loop()
-                await loop.run_in_executor(None, send_mail_notification, html_body, file_id)
+                # html_body = build_html_body(payload)
+                # loop = asyncio.get_running_loop()
+                # await loop.run_in_executor(None, send_mail_notification, html_body, file_id)
 
                 return response.json() or {"status": "success"}
 

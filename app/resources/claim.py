@@ -34,7 +34,6 @@ async def async_search_keywords_live_parallel(*args, **kwargs):
     ocr_task = partial(search_keywords_live_parallel, *args, **kwargs, executor=global_executor)
     return await loop.run_in_executor(global_executor, ocr_task)
 
-
 @router.post("/getDocumentwithOCRSearchPyMuPdf", status_code=200)
 async def get_document_with_ocr_search(
     request: OCRSearchRequest, background_tasks: BackgroundTasks
@@ -42,7 +41,10 @@ async def get_document_with_ocr_search(
     file_id = request.file_Id
     keywords_str = request.keywords
     return_only_filtered = getattr(request, "returnOnlyFilteredPages", False)
+   
 
+
+    # Validate keywords
     if not keywords_str:
         raise HTTPException(status_code=400, detail="Keywords cannot be empty.")
 
@@ -58,24 +60,33 @@ async def get_document_with_ocr_search(
     else:
         keywords = keywords_str
 
-    # Fetch base64 PDF from internal API (blocking, so offload to thread)
     loop = asyncio.get_running_loop()
-    try:
-        pdf_base64 = await loop.run_in_executor(None, lambda: fetch_pdf_base64(file_id))
-    except Exception as e:
-        logger.error(f"Failed to fetch or decode PDF for file_id {file_id}: {e}")
-        raise HTTPException(
-            status_code=404, detail=f"Unable to fetch PDF for file_id {file_id}"
-        )
+
+    # Use provided base64 PDF if present; else fetch
+    if request.base64_pdf:
+        try:
+            pdf_bytes = base64.b64decode(request.base64_pdf)
+        except Exception as e:
+            logger.error(f"Failed to decode provided base64 PDF: {e}")
+            raise HTTPException(status_code=400, detail="Invalid base64 PDF provided.")
+    else:
+        try:
+            # Offload blocking fetch call to thread executor
+            pdf_bytes = await loop.run_in_executor(None, lambda: fetch_pdf_base64(file_id))
+        except Exception as e:
+            logger.error(f"Failed to fetch or decode PDF for file_id {file_id}: {e}")
+            raise HTTPException(
+                status_code=404, detail=f"Unable to fetch PDF for file_id {file_id}"
+            )
 
     # Limit concurrent OCR jobs via semaphore
     async with ocr_semaphore:
         start_time = time.time()
 
-        # Prepare the OCR task callable with pre-filled args
+        # Prepare OCR task callable
         ocr_task = partial(
             search_keywords_live_parallel,
-            pdf_bytes=pdf_base64,
+            pdf_bytes=pdf_bytes,
             keywords=keywords,
             return_only_filtered=return_only_filtered,
             executor=global_executor,
@@ -85,9 +96,11 @@ async def get_document_with_ocr_search(
         search_response = await loop.run_in_executor(global_executor, ocr_task)
 
         end_time = time.time()
+        # processing_time = end_time - start_time
+        # processing_times.append(processing_time)
         logger.info(f"PDF processing and search took {end_time - start_time:.2f} seconds")
 
-    # Offload POST callback to background task, so client is not blocked
+    # Offload POST callback to background
     background_tasks.add_task(
         post_ocr_result_to_db_async,
         file_id,
@@ -98,7 +111,6 @@ async def get_document_with_ocr_search(
         error_callback=log_post_error,
     )
 
-    # Immediately return OCR result to client
     return JSONResponse(status_code=status.HTTP_200_OK, content=search_response)
 
 
