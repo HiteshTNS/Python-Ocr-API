@@ -33,6 +33,16 @@ def page_pixmap_to_image(pix):
     if pix.n >= 4:
         img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
     return img
+def detect_rotation(img: np.ndarray) -> int:
+    try:
+        osd = pytesseract.image_to_osd(img, config='--psm 0')
+        for line in osd.splitlines():
+            if "Rotate:" in line:
+                angle = int(line.split(":")[-1].strip())
+                return angle
+    except Exception as e:
+        logger.warning(f"[WARN] Rotation detection failed: {e}")
+    return 0
 
 def process_page_from_doc(
     page_num: int,
@@ -45,6 +55,15 @@ def process_page_from_doc(
         if len(text.strip()) < MIN_TEXT_LENGTH:
             pix = page.get_pixmap(dpi=DPI)
             img = page_pixmap_to_image(pix)
+             # Detect rotation and correct
+            rotation_angle = detect_rotation(img)
+            if rotation_angle != 0:
+                logger.info(f"[INFO] Rotating page {page_num + 1} by {rotation_angle} degrees")
+                img = cv2.rotate(img, {
+                    90: cv2.ROTATE_90_CLOCKWISE,
+                    180: cv2.ROTATE_180,
+                    270: cv2.ROTATE_90_COUNTERCLOCKWISE
+                }.get(rotation_angle, img))
             img = fast_preprocess(img)
             text = pytesseract.image_to_string(img, config=TESSERACT_CONFIG)
         cleaned = clean_ocr_text(text)
