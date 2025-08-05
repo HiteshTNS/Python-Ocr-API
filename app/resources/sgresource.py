@@ -24,11 +24,33 @@ def fetch_pdf_base64(file_id):
     pdf_bytes = base64.b64decode(pdf_base64)
     return pdf_bytes
 
-# def save_base64_to_pdf(pdf_base64):
-#     pdf_bytes = base64.b64decode(pdf_base64)
-#     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
-#         tmp_pdf.write(pdf_bytes)
-#         return pdf_bytes  # Returns the temp file path
+def fetch_pdf_base64_local(file_id):
+    url = "http://localhost:8080/document"
+    payload = {
+        "clientId": "3",
+        "processId": "4",
+        "channelId": "SGINTLCMS",
+        "processName": "CANCEL",
+        "applicationId": "8C96F819-9A73-4C8D-8A2B-ED84989CC38C",
+        "fileId": file_id,
+        "isEncrypted": "False",
+        "userName": "admin@sgintl.com",
+        "password": "Test@123"
+    }
+    response = requests.post(url, json=payload, timeout=30)
+    response.raise_for_status()
+    data = response.json()
+    # Basic checks:
+    if data.get("status") != "SUCCESS" or data.get("statusCode") != "200":
+        raise ValueError("Failed to fetch base64 PDF: {}".format(data.get("message")))
+    pdf_base64 = data["data"]["data"]
+    if not pdf_base64:
+            raise ValueError("No base64PDF found in response.")
+    mime_type=data["data"]["metadata"]["mimeType"]
+    # print("Base 64 : "+ pdf_base64)
+    pdf_bytes = base64.b64decode(pdf_base64)
+    return pdf_bytes,mime_type
+
 
 
 # def test_pdf_code(file_id=None):  # file_id is optional since /getDocuments is hardcoded

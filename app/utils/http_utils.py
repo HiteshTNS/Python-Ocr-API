@@ -28,27 +28,39 @@ async def post_ocr_result_to_db_async(
     :return: Response dict indicating success or error
     """
 
-    url = "http://127.0.0.1:8000/receive-ocr-result"  # Replace with actual downstream API URL
+    url = "http://localhost:8080/documentType/update"  # Replace with actual downstream API URL
 
     payload = {
-        "file_id": file_id,
-        "search_keywords": keywords,
-        "imageToTextSearchResponse": search_result.get("imageToTextSearchResponse", [])
+        "appUserId": "5",
+        "clientId": "3",
+        "channelId": "portal_UI",
+        "name": "TINSPECT",
+        "description": "Test Document Type",
+        "documentTypeField": [
+            {
+                "attributeName": "Test #",
+                "attributeDescription": "Contract Number",
+                "attributeValue": search_result.get("imageToTextSearchResponse", [])
+            }
+        ],
+        "applicationId": "8C96F819-9A73-4C8D-8A2B-ED84989CC38C",
+        "fileId": file_id
     }
 
     for attempt in range(1, max_retries + 1):
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(url, json=payload)
-                logger.debug(f"Response Status: {response.status_code}, Body: {response.text}")
+                response = await client.put(url, json=payload)
+                logger.info(f"Response Status: {response.status_code}, Body: {response.text}")
                 response.raise_for_status()
-
-                logger.info(f"Successfully posted OCR result to downstream API on attempt {attempt}")
+                resp_json = response.json()
+                if resp_json.get("success") is True and resp_json.get("statusCode") == "200":
+                    logger.info(f"Successfully posted OCR result to downstream API on attempt {attempt}")
 
                 # --- EMAIL SENDING LOGIC AFTER SUCCESSFUL POST ---
-                html_body = build_html_body(payload)
-                loop = asyncio.get_running_loop()
-                await loop.run_in_executor(None, send_mail_notification, html_body, file_id)
+                # html_body = build_html_body(payload)
+                # loop = asyncio.get_running_loop()
+                # await loop.run_in_executor(None, send_mail_notification, html_body, file_id)
 
                 return response.json() or {"status": "success"}
 

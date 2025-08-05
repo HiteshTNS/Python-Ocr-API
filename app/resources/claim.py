@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.models.OCRSearchRequest import OCRSearchRequest
 from app.services.search import search_keywords_live_parallel  # blocking CPU code
-from app.resources.sgresource import fetch_pdf_base64
+from app.resources.sgresource import fetch_pdf_base64, fetch_pdf_base64_local
 from app.utils.http_utils import post_ocr_result_to_db_async
 
 from concurrent.futures import ThreadPoolExecutor
@@ -39,7 +39,9 @@ async def async_search_keywords_live_parallel(*args, **kwargs):
 async def get_document_with_ocr_search(
     request: OCRSearchRequest, background_tasks: BackgroundTasks
 ):
+    
     file_id = request.file_Id
+    logger.info(f"Received OCR search request: {request.file_Id}")
     keywords_str = request.keywords
     return_only_filtered = getattr(request, "returnOnlyFilteredPages", False)
 
@@ -61,7 +63,12 @@ async def get_document_with_ocr_search(
     # Fetch base64 PDF from internal API (blocking, so offload to thread)
     loop = asyncio.get_running_loop()
     try:
-        pdf_base64 = await loop.run_in_executor(None, lambda: fetch_pdf_base64(file_id))
+        pdf_bytes, mime_type = await loop.run_in_executor(None, lambda: fetch_pdf_base64_local(file_id))
+        logger.info("Fetched file bytes and detected MIME type: %s", mime_type)
+
+        if not pdf_bytes:
+            raise ValueError("PDF bytes could not be retrieved")
+        print("mime_Type : "+ mime_type)
     except Exception as e:
         logger.error(f"Failed to fetch or decode PDF for file_id {file_id}: {e}")
         raise HTTPException(
@@ -73,13 +80,17 @@ async def get_document_with_ocr_search(
         start_time = time.time()
 
         # Prepare the OCR task callable with pre-filled args
+        logger.info("About to start OCR processing")
         ocr_task = partial(
             search_keywords_live_parallel,
-            pdf_bytes=pdf_base64,
+            pdf_bytes=pdf_bytes,
+            mime_type=mime_type,
             keywords=keywords,
             return_only_filtered=return_only_filtered,
-            executor=global_executor,
+            THREADS=os.cpu_count() or 4
         )
+        logger.info("OCR processing complete, returning response")
+
 
         # Run OCR in shared thread pool executor
         search_response = await loop.run_in_executor(global_executor, ocr_task)
@@ -127,9 +138,9 @@ def get_base64_pdf():
         raise HTTPException(status_code=500, detail=f"Failed to encode PDF: {str(e)}")
 
 
-@router.post("/receive-ocr-result")
-def receive_ocr_result(payload: dict):
-    logger.info("Received OCR result:")
-    # logger.info(payload)
-    # Optionally store/process payload here
-    return {"status": "received", "message": "Data stored successfully"}
+# @router.put("/receive-ocr-result")
+# def receive_ocr_result(payload: dict):
+#     logger.info("Received OCR result:")
+#     # logger.info(payload)
+#     # Optionally store/process payload here
+#     return {"status": "received", "message": "Data stored successfully"}
