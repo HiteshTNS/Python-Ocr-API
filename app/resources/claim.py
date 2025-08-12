@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.models.OCRSearchRequest import OCRSearchRequest
 from app.services.search import search_keywords_live_parallel  # blocking CPU code
-from app.resources.sgresource import fetch_pdf_base64, fetch_pdf_base64_local
+from app.resources.sgresource import  fetch_pdf_base64_local
 from app.utils.http_utils import post_ocr_result_to_db_async
 
 from concurrent.futures import ThreadPoolExecutor
@@ -80,7 +80,7 @@ async def get_document_with_ocr_search(
         start_time = time.time()
 
         # Prepare the OCR task callable with pre-filled args
-        logger.info("About to start OCR processing")
+        # logger.info("About to start OCR processing")
         ocr_task = partial(
             search_keywords_live_parallel,
             pdf_bytes=pdf_bytes,
@@ -118,24 +118,24 @@ async def log_post_error(exc: Exception, **kwargs):
     logger.error(f"Final failure posting OCR result for file_id {file_id}: {exc}")
 
 
-@router.post("/getDocuments")
-def get_base64_pdf():
-    """
-    Returns a base64-encoded string of a hardcoded PDF file.
-    """
-    pdf_file_path = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\PIUNTI 108721.pdf"  # change as needed
+# @router.post("/getDocuments")
+# def get_base64_pdf():
+#     """
+#     Returns a base64-encoded string of a hardcoded PDF file.
+#     """
+#     pdf_file_path = r"C:\Users\hitesh.paliwal\Downloads\VCI - claims PDF\PIUNTI 108721.pdf"  # change as needed
 
-    if not os.path.exists(pdf_file_path):
-        raise HTTPException(status_code=404, detail="PDF file not found.")
+#     if not os.path.exists(pdf_file_path):
+#         raise HTTPException(status_code=404, detail="PDF file not found.")
 
-    try:
-        with open(pdf_file_path, "rb") as pdf_file:
-            pdf_bytes = pdf_file.read()
-            base64_str = base64.b64encode(pdf_bytes).decode("utf-8")
+#     try:
+#         with open(pdf_file_path, "rb") as pdf_file:
+#             pdf_bytes = pdf_file.read()
+#             base64_str = base64.b64encode(pdf_bytes).decode("utf-8")
 
-        return JSONResponse(content={"status": "success", "base64PDF": base64_str})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to encode PDF: {str(e)}")
+#         return JSONResponse(content={"status": "success", "base64PDF": base64_str})
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Failed to encode PDF: {str(e)}")
 
 
 # @router.put("/receive-ocr-result")

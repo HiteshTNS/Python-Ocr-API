@@ -1,6 +1,7 @@
 import logging
 import re
 import os
+import time
 from typing import List, Dict, Optional, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -35,7 +36,10 @@ def page_pixmap_to_image(pix):
     return img
 def detect_rotation(img: np.ndarray) -> int:
     try:
+        # st_time=time.time()
         osd = pytesseract.image_to_osd(img, config='--psm 0')
+        # ed_time=time.time()
+        # print(f"Time taken by osd process : {ed_time - st_time} seconds")
         for line in osd.splitlines():
             if "Rotate:" in line:
                 angle = int(line.split(":")[-1].strip())
@@ -43,6 +47,7 @@ def detect_rotation(img: np.ndarray) -> int:
     except Exception as e:
         logger.warning(f"[WARN] Rotation detection failed: {e}")
     return 0
+
 
 def rotate_image(img: np.ndarray, angle: int) -> np.ndarray:
     if angle == 90:
@@ -59,38 +64,54 @@ def process_pdf_page(
     keywords: List[str],
     return_only_filtered: bool
 ) -> Optional[Dict]:
-    """
-    Process a single PDF page: extract text or run OCR if text is too short,
-    then match keywords and return structured result or None.
-    """
     try:
-        print("Inside Pdf Extractor")
         text = page.get_text()
         if len(text.strip()) < MIN_TEXT_LENGTH:
             pix = page.get_pixmap(dpi=DPI)
             img = page_pixmap_to_image(pix)
-            rotation_angle = detect_rotation(img)
-            if rotation_angle != 0:
-                logger.info(f"[INFO] Rotating page {page_num + 1} by {rotation_angle} degrees")
-                img = rotate_image(img, rotation_angle)
-            img = fast_preprocess(img)
-            text = pytesseract.image_to_string(img, config=TESSERACT_CONFIG)
+            img_pre = fast_preprocess(img)
+            
+            # First OCR attempt
+            text = pytesseract.image_to_string(img_pre, config=TESSERACT_CONFIG)
+            cleaned = clean_ocr_text(text)
+            
+            matched_keywords = [
+                kw for kw in keywords
+                if re.search(rf'\b{re.escape(kw)}\b', cleaned, flags=re.IGNORECASE)
+            ]
 
-        cleaned = clean_ocr_text(text)
-        matched_keywords = [
-            kw for kw in keywords if re.search(rf'\b{re.escape(kw)}\b', cleaned, flags=re.IGNORECASE)
-        ]
+            #  If no keywords found, try rotation
+            if not matched_keywords:
+                # start_time=time.time()
+                rotation_angle = detect_rotation(img)
+                # end_time=time.time()
+                # print(f"Rotation Detection time took : {end_time-start_time}")
+                if rotation_angle != 0:
+                    logger.info(f"[INFO] Rotating page {page_num+1} by {rotation_angle} degrees")
+                    img_rot = rotate_image(img, rotation_angle)
+                    img_rot_pre = fast_preprocess(img_rot)
+                    text = pytesseract.image_to_string(img_rot_pre, config=TESSERACT_CONFIG)
+                    cleaned = clean_ocr_text(text)
+                    
+                    matched_keywords = [
+                        kw for kw in keywords
+                        if re.search(rf'\b{re.escape(kw)}\b', cleaned, flags=re.IGNORECASE)
+                    ]
 
-        if matched_keywords or not return_only_filtered:
-            return {
+            if matched_keywords or not return_only_filtered:
+                return {
+                    "pageNO": page_num + 1,
+                    "keywordMatched": bool(matched_keywords),
+                    "selectedKeywords": "|".join(matched_keywords),
+                    "pageContent": cleaned.replace("\n", " ")
+                }
+
+            return None if return_only_filtered else {
                 "pageNO": page_num + 1,
-                "keywordMatched": bool(matched_keywords),
-                "selectedKeywords": "|".join(matched_keywords),
+                "keywordMatched": False,
+                "selectedKeywords": "",
                 "pageContent": cleaned.replace("\n", " ")
             }
-        elif return_only_filtered:
-            # Explicit return if filtering and no keywords matched for this page
-            return None
 
     except Exception as e:
         logger.error(f"[PDF Page {page_num}] Error: {e}")
@@ -102,30 +123,40 @@ def process_image_bytes(
     keywords: List[str],
     return_only_filtered: bool
 ) -> Dict[str, Union[List[Dict], Dict]]:
-    """
-    Process an image file (jpeg/png/tiff) given as bytes,
-    run OCR after rotation correction & preprocessing,
-    return structured result JSON matching PDF output format.
-    """
+
     try:
-        print("Inside Image Extractor")
+
         nparr = np.frombuffer(img_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:
             raise ValueError("Unable to decode image file.")
 
-        rotation_angle = detect_rotation(img)
-        if rotation_angle != 0:
-            img = rotate_image(img, rotation_angle)
-
-        img = fast_preprocess(img)
-        text = pytesseract.image_to_string(img, config=TESSERACT_CONFIG)
-
+        # 🔹 First OCR attempt (without rotation)
+        img_pre = fast_preprocess(img)
+        text = pytesseract.image_to_string(img_pre, config=TESSERACT_CONFIG)
         cleaned = clean_ocr_text(text)
+
         matched_keywords = [
-            kw for kw in keywords if re.search(rf'\b{re.escape(kw)}\b', cleaned, flags=re.IGNORECASE)
+            kw for kw in keywords
+            if re.search(rf'\b{re.escape(kw)}\b', cleaned, flags=re.IGNORECASE)
         ]
 
+        # 🔹 If no keyword matched, try rotation
+        if not matched_keywords:
+            rotation_angle = detect_rotation(img)
+            if rotation_angle != 0:
+                logger.info(f"[INFO] Rotating image by {rotation_angle} degrees")
+                img_rot = rotate_image(img, rotation_angle)
+                img_rot_pre = fast_preprocess(img_rot)
+                text = pytesseract.image_to_string(img_rot_pre, config=TESSERACT_CONFIG)
+                cleaned = clean_ocr_text(text)
+
+                matched_keywords = [
+                    kw for kw in keywords
+                    if re.search(rf'\b{re.escape(kw)}\b', cleaned, flags=re.IGNORECASE)
+                ]
+
+        # 🔹 Prepare structured response
         if matched_keywords or not return_only_filtered:
             return {
                 "imageToTextSearchResponse": [{
@@ -135,7 +166,8 @@ def process_image_bytes(
                     "pageContent": cleaned.replace("\n", " ")
                 }]
             }
-        elif return_only_filtered:
+
+        if return_only_filtered:
             return {
                 "imageToTextSearchResponse": [{
                     "pageNO": 0,
@@ -145,7 +177,6 @@ def process_image_bytes(
                 }]
             }
 
-        # Fallback explicit return - no matches and return_only_filtered==False
         return {
             "imageToTextSearchResponse": [{
                 "pageNO": 0,
@@ -165,7 +196,6 @@ def process_image_bytes(
                 "pageContent": str(e)
             }]
         }
-
 
 def search_keywords_live_parallel(
     pdf_bytes: bytes,
